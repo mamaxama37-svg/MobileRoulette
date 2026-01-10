@@ -15,8 +15,9 @@ button { padding: 10px 15px; font-size: 1em; margin: 10px; background: #0a84ff; 
 input { width: 60px; margin:5px; }
 </style>
 
-<!-- html2canvas library -->
+<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 
 </head>
 <body>
@@ -103,14 +104,49 @@ function captureScreen(){
   });
 }
 
-// Example analysis (placeholder)
+// --- Ball & Number Detection ---
 function analyzeCanvas(ctx){
-  // Here you can read pixels/colors from ctx to detect numbers/ball
-  console.log("Screen captured. Ready for pixel analysis.");
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  const data = ctx.getImageData(0,0,width,height).data;
+
+  // --- Detect ball (bright spot) ---
+  let ballFound=false;
+  for(let y=0; y<height; y+=5){
+    for(let x=0; x<width; x+=5){
+      const i = (y*width + x)*4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if(r>200 && g>200 && b>200){ // bright ball
+        ballFound=true;
+        console.log("Ball detected at:", x, y);
+        break;
+      }
+    }
+    if(ballFound) break;
+  }
+
+  // --- Detect last number from fixed region (OCR) ---
+  const numX = width*0.7; // adjust depending on table layout
+  const numY = height*0.05;
+  const numW = 60;
+  const numH = 30;
+
+  const numberRegion = ctx.getImageData(numX, numY, numW, numH);
+
+  Tesseract.recognize(numberRegion,'eng')
+    .then(result=>{
+      const num = parseInt(result.data.text.replace(/\D/g,''));
+      if(!isNaN(num) && num>=0 && num<=36){
+        registerNumber(num);
+      }
+    }).catch(err=>{
+      console.log("OCR error:", err);
+    });
 }
 
 // Repeat every 1 second
 setInterval(captureScreen, 1000);
+
 </script>
 
 </body>
