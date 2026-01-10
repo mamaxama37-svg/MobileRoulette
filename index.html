@@ -3,154 +3,131 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart Roulette Analyzer v3</title>
+<title>Live Roulette Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
-header { background:#111; padding:12px; font-size:1.3em; }
-#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-button { padding:8px 12px; margin:6px; font-size:1em; }
-textarea { width:90%; height:100px; margin:4px 0; }
-canvas { display:block; margin:auto; border:2px solid #555; border-radius:50%; background:#111; }
-.info { margin-top:6px; font-size:0.9em; text-align:left; width:90%; margin:auto; }
-.hot { color:#b00; font-weight:bold; }
-.warm { color:#f90; }
-.cold { color:#666; }
-.bar { height:16px; border-radius:4px; margin:2px 0; display:flex; align-items:center; }
-.bar-num { width:25px; text-align:center; margin-right:4px; }
+body { margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
+header{background:#111;padding:10px;font-size:1.3em;}
+#videoContainer{position:relative;width:100%;max-width:600px;margin:auto;}
+video{width:100%;border:2px solid #fff;}
+canvas{position:absolute;top:0;left:0;}
+#stats{margin-top:10px;font-size:0.9em;}
+.statBox{background:#222;padding:8px;margin:4px;border-radius:5px;}
 </style>
 </head>
 <body>
-
-<header>Smart Roulette Analyzer v3</header>
-
-<div id="box">
-<b>1️⃣ Paste Last 100 Numbers (1-36)</b><br>
-<textarea id="numInput" placeholder="Example: 10,23,5,8,11,..."></textarea><br>
-<button onclick="analyzeNumbers()">Analyze Numbers</button>
+<header>Live Roulette Analyzer</header>
+<div id="videoContainer">
+  <video id="cameraVideo" autoplay playsinline></video>
+  <canvas id="overlay"></canvas>
 </div>
 
-<div id="box">
-<div class="info" id="status">Waiting for numbers…</div>
-<div class="info" id="prediction"></div>
-<div class="info" id="betSector"></div>
-<div class="info" id="neighborPred"></div>
-<div class="info" id="probabilities"></div>
+<div id="stats">
+  <div class="statBox" id="ballSpeed">Ball Speed: -- rad/s</div>
+  <div class="statBox" id="lastNumbers">Last Numbers: --</div>
+  <div class="statBox" id="prediction">Next Prediction: --</div>
+  <div class="statBox" id="topSectors">Top 3 Sectors: --</div>
+  <div class="statBox" id="topNeighbors">Top 5 Neighbors: --</div>
 </div>
 
-<canvas id="miniWheel" width="320" height="320"></canvas>
-
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-// ===== Wheel Layout =====
+// ===== Wheel Setup =====
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
 22,18,29,7,28,12,35,3,26];
 
-let history=[], topNumber=null, top3=[], neighbors=[], topNeighbor=null;
-const canvas=document.getElementById("miniWheel");
-const ctx=canvas.getContext("2d");
-const cx=canvas.width/2, cy=canvas.height/2, radius=canvas.width/2-20;
+let history=[], lastNumber=-1;
+let prevAngle=null, prevTime=null, currentSpeed=0;
+let topSectors=[], topNeighbors=[];
 
-// ===== Analyze Numbers =====
-function analyzeNumbers(){
-  const text=document.getElementById("numInput").value;
-  let nums=text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-  if(!nums || nums.length<50) return alert("Enter at least 50 numbers");
-  history=nums.map(Number).slice(-100);
-  document.getElementById("status").innerText="Numbers analyzed: "+history.join(",");
-  calculatePredictions();
+// ===== Camera Setup =====
+const video=document.getElementById('cameraVideo');
+const canvas=document.getElementById('overlay');
+const ctx=canvas.getContext('2d');
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}})
+.then(stream => video.srcObject = stream)
+.catch(e=>alert("Camera access denied"));
+
+// ===== OCR Placeholder (You can extend) =====
+async function detectNumber(frame) {
+  // This can be extended with Tesseract OCR on the frame
+  // For demo: return a random number
+  const num = Math.floor(Math.random()*37);
+  return num;
 }
 
-// ===== Prediction =====
-function calculatePredictions(){
-  const heat=Array(37).fill(0);
+// ===== Ball Detection Placeholder =====
+function detectBall(frameCtx){
+  // This should process the frame and find the bright moving ball
+  // For demo: simulate random coordinates
+  return {x:Math.random()*canvas.width, y:Math.random()*canvas.height};
+}
 
-  // Weighted calculation: neighbors get 50% extra
-  history.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    for(let i=-1;i<=1;i++){
-      heat[(idx+i+37)%37]+=1; // main
-      if(i!==0) heat[(idx+i+37)%37]+=0.5; // neighbor extra
+// ===== Track Ball Motion =====
+function trackBall(ball){
+  const centerX=canvas.width/2, centerY=canvas.height/2;
+  const now=performance.now();
+  const angle=Math.atan2(ball.y-centerY, ball.x-centerX);
+  if(prevAngle!==null){
+    const dt=(now-prevTime)/1000;
+    currentSpeed=(angle-prevAngle)/dt;
+  }
+  prevAngle=angle; prevTime=now;
+}
+
+// ===== Analyze Frame =====
+async function analyzeFrame(){
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+  const ball=detectBall(ctx);
+  if(ball) trackBall(ball);
+
+  // For demo: simulate OCR number detection every second
+  if(Math.random()<0.05){
+    const num=await detectNumber(ctx);
+    if(num>=0 && num<=36 && num!==lastNumber){
+      lastNumber=num;
+      history.push(num);
+      if(history.length>100) history.shift();
+      updatePredictions();
     }
-  });
-
-  // Sort numbers by weighted heat
-  const sorted=heat.map((v,i)=>({num:wheel[i],weight:v})).sort((a,b)=>b.weight-a.weight);
-  topNumber=sorted[0].num;
-  top3=sorted.slice(0,3).map(x=>x.num);
-
-  // Top 5 neighbors around top 3
-  const neighborSet=new Set();
-  for(let n of top3){
-    const idx=wheel.indexOf(n);
-    [wheel[(idx-1+37)%37], wheel[(idx+1)%37]].forEach(x=>{
-      if(neighborSet.size<5 && !top3.includes(x)) neighborSet.add(x);
-    });
   }
-  neighbors=Array.from(neighborSet);
 
-  // Predict most likely next neighbor
-  const neighborCounts=Array(37).fill(0);
-  history.forEach(n=>{
-    if(neighbors.includes(n)) neighborCounts[n]+=1;
-  });
-  const maxCount=Math.max(...neighborCounts);
-  topNeighbor=neighborCounts.indexOf(maxCount);
-
-  // Output
-  document.getElementById("prediction").innerHTML=
-    "<b>Predicted Next Number:</b> <span class='hot'>"+topNumber+"</span><br>"+
-    "<b>Top 3 Numbers:</b> "+top3.join(", ")+"<br>"+
-    "<b>5 Neighbors:</b> "+neighbors.join(", ");
-
-  const sector=[topNumber,...neighbors].slice(0,5);
-  document.getElementById("betSector").innerHTML=
-    "<b>Suggested Bet Sector:</b> "+sector.join(", ");
-
-  document.getElementById("neighborPred").innerHTML=
-    "<b>Most Likely Neighbor Next Spin:</b> "+topNeighbor;
-
-  drawMiniWheel();
-  drawProbabilities();
+  requestAnimationFrame(analyzeFrame);
 }
 
-// ===== Mini-Wheel =====
-function drawMiniWheel(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const angleStep=2*Math.PI/37;
-  for(let i=0;i<37;i++){
-    const ang=i*angleStep-Math.PI/2;
-    const x=cx+radius*Math.cos(ang);
-    const y=cy+radius*Math.sin(ang);
-    ctx.beginPath();
-    ctx.arc(x,y,14,0,2*Math.PI);
-    const n=wheel[i];
-    if(n===topNumber){ ctx.fillStyle="#b00"; ctx.shadowColor="#f00"; ctx.shadowBlur=14;}
-    else if(top3.includes(n)){ ctx.fillStyle="#f60"; ctx.shadowColor="#f90"; ctx.shadowBlur=6;}
-    else if(neighbors.includes(n)){ ctx.fillStyle="#ff0"; ctx.shadowColor="#ff0"; ctx.shadowBlur=4;}
-    else { ctx.fillStyle="#444"; ctx.shadowBlur=0;}
-    ctx.fill();
-    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(n,x,y);
-  }
-}
-
-// ===== Probabilities =====
-function drawProbabilities(){
-  const total=history.length;
-  let html="<b>Probabilities:</b><br>";
+// ===== Predictions =====
+function updatePredictions(){
+  if(history.length===0) return;
+  // Frequency analysis
   const counts=Array(37).fill(0);
   history.forEach(n=>counts[n]+=1);
-  for(let i=0;i<37;i++){
-    const p=((counts[wheel[i]]/total)*100).toFixed(1);
-    const color=p>10?'#b00':p>5?'#f90':'#444';
-    html+=`<div class="bar">
-      <span class="bar-num">${wheel[i]}</span>
-      <div style="height:16px;width:${p*2}%;background:${color};border-radius:4px;"></div>
-      <span style="margin-left:4px">${p}%</span>
-    </div>`;
+  const sorted=counts.map((v,i)=>({num:i,count:v})).sort((a,b)=>b.count-a.count);
+
+  topSectors=sorted.slice(0,3).map(x=>x.num);
+
+  // Top neighbors: 5 numbers around top 3
+  const neighborSet=new Set();
+  for(let n of topSectors){
+    const idx=wheel.indexOf(n);
+    [wheel[(idx-1+37)%37], wheel[(idx+1)%37]].forEach(x=>{
+      if(neighborSet.size<5 && !topSectors.includes(x)) neighborSet.add(x);
+    });
   }
-  document.getElementById("probabilities").innerHTML=html;
+  topNeighbors=Array.from(neighborSet);
+
+  document.getElementById('ballSpeed').innerText="Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
+  document.getElementById('lastNumbers').innerText="Last Numbers: "+history.slice(-10).join(", ");
+  document.getElementById('prediction').innerText="Next Prediction: "+sorted[0].num;
+  document.getElementById('topSectors').innerText="Top 3 Sectors: "+topSectors.join(", ");
+  document.getElementById('topNeighbors').innerText="Top 5 Neighbors: "+topNeighbors.join(", ");
 }
+
+// Start
+video.onloadedmetadata=()=>analyzeFrame();
 </script>
 </body>
 </html>
