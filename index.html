@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart Professional Roulette Analyzer (Last 100)</title>
+<title>Smart Roulette Analyzer – Focused Prediction</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
@@ -21,16 +21,14 @@ textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; }
 </head>
 <body>
 
-<header>Smart Professional Roulette Analyzer (Last 100 Numbers)</header>
+<header>Smart Roulette Analyzer – Focused Prediction</header>
 
-<!-- PASTE NUMBERS -->
 <div id="box">
 <b>Paste Last 100 Numbers</b><br>
 <textarea id="numbersInput" placeholder="0,32,15,..."></textarea><br>
 <button onclick="analyzeNumbers()">Analyze</button>
 </div>
 
-<!-- OUTPUT -->
 <div id="box">
 <div id="status">Waiting for data…</div>
 <div id="macroSector"></div>
@@ -42,7 +40,6 @@ textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; }
 <div id="risk"></div>
 </div>
 
-<!-- HEATMAP -->
 <div id="box">
 <b>Wheel Heatmap</b>
 <div id="heatmap"></div>
@@ -53,10 +50,9 @@ const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,
 
 let history100 = [];
 let macroSector = [];
-let last14Sector = [];
+let last14 = [];
 let lastHeat = [];
 
-/* ===== ANALYZE LAST 100 NUMBERS ===== */
 function analyzeNumbers(){
   const raw = document.getElementById("numbersInput").value;
   if(!raw) return alert("Paste your numbers first");
@@ -65,16 +61,13 @@ function analyzeNumbers(){
   if(!nums || nums.length<100) return alert("Paste at least 100 numbers");
 
   history100 = nums.slice(-100);
-  document.getElementById("status").innerText = "Analyzing last 100 numbers…";
-
-  // Automatically detect last 14 numbers
-  last14Sector = history100.slice(-14);
-  document.getElementById("momentumSector").innerHTML = "<b>Auto Last-14 Numbers:</b> " + last14Sector.join(", ");
+  last14 = history100.slice(-14);
+  document.getElementById("momentumSector").innerHTML = "<b>Auto Last-14 Numbers:</b> " + last14.join(", ");
+  document.getElementById("status").innerText = "Analyzing…";
 
   runMacroEngine(history100);
 }
 
-/* ===== MACRO SECTOR ===== */
 function runMacroEngine(history){
   const heat = Array(37).fill(0);
   history.forEach(n=>{
@@ -84,36 +77,27 @@ function runMacroEngine(history){
 
   lastHeat = heat;
 
-  // Best 10-number macro sector
-  let best={sum:0,start:0};
-  for(let i=0;i<37;i++){
-    let s=0;
-    for(let j=0;j<10;j++) s+=heat[(i+j)%37];
-    if(s>best.sum) best={sum:s,start:i};
-  }
+  // Smaller macro sector: top 6 numbers by heat
+  const sortedHeat = heat.map((v,i)=>({num: wheel[i], heat:v})).sort((a,b)=>b.heat-a.heat);
+  macroSector = sortedHeat.slice(0,6).map(x=>x.num);
 
-  macroSector=[];
-  for(let i=0;i<10;i++) macroSector.push(wheel[(best.start+i)%37]);
-
-  document.getElementById("macroSector").innerHTML = "<b>Macro Sector:</b> " + macroSector.join(", ");
+  document.getElementById("macroSector").innerHTML = "<b>Macro Sector (Top 6):</b> "+macroSector.join(", ");
 
   drawHeatmap(heat);
   updateSmartPrediction();
 }
 
-/* ===== SMART PREDICTION (Numbers + Neighbors) ===== */
 function updateSmartPrediction(){
   if(history100.length===0) return;
 
-  // Frequency analysis
+  // Frequency + last14 weighting
   const freq = {};
   history100.forEach(n=>freq[n]=(freq[n]||0)+1);
 
-  // Top numbers based on frequency + last14 momentum weighting
   const scores = {};
   for(let n=0;n<=36;n++){
     let score = freq[n] || 0;
-    if(last14Sector.includes(n)) score += 2; // boost momentum
+    if(last14.includes(n)) score += 2; // boost last-14
     scores[n] = score;
   }
 
@@ -128,28 +112,25 @@ function updateSmartPrediction(){
     neighbors.push(wheel[(idx+1)%37]);
   });
 
-  // Final sector merge
-  let finalSector = macroSector.slice();
-  const overlap = macroSector.filter(n=>last14Sector.includes(n));
-  if(overlap.length>=5) finalSector = overlap;
-  else finalSector = [...new Set([...last14Sector,...macroSector])].slice(0,10);
+  // Focused final sector: only top numbers + neighbors
+  const finalSector = [...new Set([...topNumbers,...neighbors])];
 
-  // Display outputs
-  document.getElementById("topNumbers").innerHTML = "<b>Top Predicted Numbers:</b> "+topNumbers.join(", ");
+  // Display
+  document.getElementById("topNumbers").innerHTML = "<b>Top Numbers:</b> "+topNumbers.join(", ");
   document.getElementById("neighbors").innerHTML = "<b>Neighbors:</b> "+neighbors.join(", ");
-  document.getElementById("prediction").innerHTML = "<b>Final Sector Prediction:</b> "+finalSector.join(", ");
+  document.getElementById("prediction").innerHTML = "<b>Final Focused Prediction:</b> "+finalSector.join(", ");
 
   // Stake & Risk
-  const bankroll=100;
-  const strength=finalSector.length<=6 ? 0.06 : 0.03;
-  const stake=Math.max(1,Math.floor(bankroll*strength));
+  const bankroll = 100;
+  const strength = finalSector.length<=6 ? 0.06 : 0.03;
+  const stake = Math.max(1, Math.floor(bankroll*strength));
   document.getElementById("stake").innerHTML = "Suggested Flat Stake: <b>"+stake+" units</b>";
 
-  const decay = finalSector.filter(n=>last14Sector.includes(n)).length<3;
+  const overlap = finalSector.filter(n=>last14.includes(n));
+  const decay = overlap.length<3;
   document.getElementById("risk").innerHTML = decay ? "⚠️ Weak confirmation – reduce/skip" : "✅ Sector confirmed – playable";
 }
 
-/* ===== HEATMAP ===== */
 function drawHeatmap(heat){
   const el=document.getElementById("heatmap");
   el.innerHTML="";
