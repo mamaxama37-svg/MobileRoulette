@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Professional Roulette Sector Analyzer (100 numbers)</title>
+<title>Professional Roulette Sector Analyzer (Paste Numbers)</title>
 
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
@@ -11,6 +11,7 @@ header { background:#111; padding:12px; font-size:1.3em; }
 #box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
 input { width:42px; padding:4px; margin:2px; }
+textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; }
 #heatmap span {
   display:inline-block; width:28px; margin:2px; padding:4px;
   border-radius:4px; font-size:0.9em;
@@ -25,11 +26,11 @@ input { width:42px; padding:4px; margin:2px; }
 
 <header>Professional Roulette Sector Analyzer</header>
 
-<!-- SCREENSHOT OCR -->
+<!-- PASTE NUMBERS -->
 <div id="box">
-<b>1️⃣ Upload Screenshot (≈100 numbers)</b><br>
-<input type="file" accept="image/*" id="img">
-<button onclick="analyzeScreenshot()">Analyze Screenshot</button>
+<b>1️⃣ Paste Last 500 Numbers (comma, space, or newline separated)</b><br>
+<textarea id="numbersInput" placeholder="e.g., 0,32,15,19,..."></textarea><br>
+<button onclick="analyzeNumbers()">Analyze Numbers</button>
 </div>
 
 <!-- LAST 14 INPUT -->
@@ -53,8 +54,6 @@ input { width:42px; padding:4px; margin:2px; }
 <div id="heatmap"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
-
 <script>
 /* ===== WHEEL MODEL ===== */
 const wheel = [
@@ -75,33 +74,21 @@ for(let i=0;i<14;i++){
   holder.appendChild(inp);
 }
 
-/* ===== SCREENSHOT OCR (≈100 SPINS) ===== */
-async function analyzeScreenshot(){
-  const file=document.getElementById("img").files[0];
-  if(!file) return alert("Upload screenshot");
+/* ===== ANALYZE PASTED NUMBERS ===== */
+function analyzeNumbers(){
+  const raw = document.getElementById("numbersInput").value;
+  if(!raw) return alert("Paste your numbers first");
 
-  document.getElementById("status").innerText="OCR scanning…";
+  // Extract numbers from commas, spaces, or newlines
+  let nums = raw.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums || nums.length<100) return alert("At least 100 numbers required");
 
-  // ---- Step 2: Better OCR options ----
-  const r = await Tesseract.recognize(file, 'eng', {
-    tessedit_char_whitelist: '0123456789',   // Only digits
-    preserve_interword_spaces: 1,
-    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT  // Detect scattered numbers
-  });
-
-  // ---- Step 3: Check what numbers Tesseract detected ----
-  let nums = r.data.text.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g);
-  console.log("Detected numbers:", nums);  // Debug output in console
-
-  // ---- Step 4: Lower threshold if OCR misses some numbers ----
-  if(!nums || nums.length < 80) 
-      return alert("Not enough numbers detected (need ≥80)");
-
-  nums = nums.map(Number).slice(-100); // Take last 100 numbers if available
+  nums = nums.map(Number).slice(-500); // Last 500 numbers
+  document.getElementById("status").innerText = "Numbers loaded: "+nums.length;
   runMacroEngine(nums);
 }
 
-/* ===== MACRO SECTOR (100 numbers) ===== */
+/* ===== MACRO SECTOR ===== */
 function runMacroEngine(history){
   const heat = Array(37).fill(0);
 
