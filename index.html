@@ -27,7 +27,7 @@ input { width:42px; padding:4px; margin:2px; }
 
 <!-- SCREENSHOT OCR -->
 <div id="box">
-<b>1️⃣ Upload Screenshot (100 numbers)</b><br>
+<b>1️⃣ Upload Screenshot (≈100 numbers)</b><br>
 <input type="file" accept="image/*" id="img">
 <button onclick="analyzeScreenshot()">Analyze Screenshot</button>
 </div>
@@ -75,22 +75,29 @@ for(let i=0;i<14;i++){
   holder.appendChild(inp);
 }
 
-/* ===== SCREENSHOT OCR (100 SPINS) ===== */
+/* ===== SCREENSHOT OCR (≈100 SPINS) ===== */
 async function analyzeScreenshot(){
   const file=document.getElementById("img").files[0];
   if(!file) return alert("Upload screenshot");
 
   document.getElementById("status").innerText="OCR scanning…";
 
-  const r = await Tesseract.recognize(file,'eng',{
-    tessedit_char_whitelist:'0123456789',
-    preserve_interword_spaces:1
+  // ---- Step 2: Better OCR options ----
+  const r = await Tesseract.recognize(file, 'eng', {
+    tessedit_char_whitelist: '0123456789',   // Only digits
+    preserve_interword_spaces: 1,
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT  // Detect scattered numbers
   });
-  
-  let nums = r.data.text.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g);
-  if(!nums || nums.length<100) return alert("Not enough numbers detected (need ≥100)");
 
-  nums = nums.map(Number).slice(-100); // **detect last 100 numbers**
+  // ---- Step 3: Check what numbers Tesseract detected ----
+  let nums = r.data.text.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g);
+  console.log("Detected numbers:", nums);  // Debug output in console
+
+  // ---- Step 4: Lower threshold if OCR misses some numbers ----
+  if(!nums || nums.length < 80) 
+      return alert("Not enough numbers detected (need ≥80)");
+
+  nums = nums.map(Number).slice(-100); // Take last 100 numbers if available
   runMacroEngine(nums);
 }
 
