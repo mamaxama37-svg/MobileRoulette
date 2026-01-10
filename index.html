@@ -4,10 +4,82 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mobile Roulette Analyzer</title>
+<style>
+body { background: #000; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; text-align: center; }
+header { background: #111; padding: 10px; font-size: 1.4em; }
+button { padding: 10px 15px; font-size: 1em; margin: 10px; background: #0a84ff; color: #fff; border: none; border-radius: 6px; }
+#statsContainer { display: flex; flex-wrap: wrap; justify-content: space-around; margin: 10px; }
+.statBox { background: #222; padding: 10px; margin: 5px; border-radius: 6px; flex: 1 1 45%; min-width: 140px; }
+input { width: 60px; }
+</style>
 </head>
-<body style="background:#000; color:#fff; text-align:center; font-family:sans-serif;">
-<h1>Mobile Roulette Analyzer</h1>
-<p>Manual number input:</p>
-<input type="number" min="0" max="36" style="margin:10px auto; display:block;">
+<body>
+
+<header>Mobile Roulette Analyzer</header>
+
+<div>
+<p>Manual input (backup):</p>
+<input id="manualNumber" type="number" min="0" max="36">
+<button onclick="addManual()">Add Number</button>
+</div>
+
+<div id="statsContainer">
+<div class="statBox" id="lastNumber">Last Number: --</div>
+<div class="statBox" id="neighbors">Neighbors: --</div>
+<div class="statBox" id="hotcold">Hot / Cold: --</div>
+<div class="statBox" id="prediction">Next Prediction: --</div>
+</div>
+
+<script>
+const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+let history=[],lastNumber=null;
+
+function addManual(){
+  const val=parseInt(document.getElementById("manualNumber").value);
+  if(!isNaN(val)&&val>=0&&val<=36) registerNumber(val);
+}
+
+function registerNumber(num){
+  if(num===lastNumber) return;
+  lastNumber=num;
+  history.push(num);
+  if(history.length>200) history.shift();
+  updateUI();
+}
+
+function getNeighbors(num){
+  const idx=wheel.indexOf(num);
+  let n=[];
+  for(let i=-2;i<=2;i++) n.push(wheel[(idx+i+wheel.length)%wheel.length]);
+  return n;
+}
+
+function getHotCold(){
+  const last50=history.slice(-50);
+  let freq={};
+  last50.forEach(n=>freq[n]=(freq[n]||0)+1);
+  const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+  const hot=sorted.slice(0,5).map(x=>x[0]);
+  const cold=sorted.slice(-5).map(x=>x[0]);
+  return {hot,cold};
+}
+
+function predictNext(){
+  if(lastNumber===null) return "--";
+  const neighbors=getNeighbors(lastNumber);
+  const hc=getHotCold();
+  const candidates=[...new Set([...neighbors,...hc.hot])];
+  return candidates[Math.floor(Math.random()*candidates.length)];
+}
+
+function updateUI(){
+  document.getElementById("lastNumber").innerText="Last Number: "+lastNumber;
+  document.getElementById("neighbors").innerText="Neighbors: "+getNeighbors(lastNumber).join(", ");
+  const hc=getHotCold();
+  document.getElementById("hotcold").innerText="Hot: "+hc.hot.join(", ")+" | Cold: "+hc.cold.join(", ");
+  document.getElementById("prediction").innerText="Next Prediction: "+predictNext();
+}
+</script>
+
 </body>
 </html>
