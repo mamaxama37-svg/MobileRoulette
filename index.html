@@ -3,25 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart Roulette Analyzer – Top 3 Prediction</title>
+<title>Pro Roulette Dashboard – Mini Wheel</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
 #box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
+textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; resize:none; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
-textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; }
-#heatmap span {
-  display:inline-block; width:28px; margin:2px; padding:4px;
-  border-radius:4px; font-size:0.9em;
-}
-.hot { background:#b00; }
-.warm { background:#665500; }
-.cold { background:#222; }
+canvas { background:#111; border:2px solid #555; border-radius:50%; margin:10px auto; display:block; }
+.info { margin-top:6px; font-size:0.95em; }
 </style>
 </head>
 <body>
 
-<header>Smart Roulette Analyzer – Top 3 Numbers</header>
+<header>Pro Roulette Dashboard – Mini Wheel</header>
 
 <div id="box">
 <b>Paste Last 100 Numbers</b><br>
@@ -30,26 +25,20 @@ textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; }
 </div>
 
 <div id="box">
-<div id="status">Waiting for data…</div>
+<div id="status">Waiting for input…</div>
 <div id="macroSector"></div>
 <div id="topNumbers"></div>
 <div id="neighbors"></div>
-<div id="prediction"></div>
-<div id="stake"></div>
-<div id="risk"></div>
+<div class="info" id="probability"></div>
 </div>
 
-<div id="box">
-<b>Wheel Heatmap</b>
-<div id="heatmap"></div>
-</div>
+<canvas id="miniWheel" width="300" height="300"></canvas>
 
 <script>
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 
-let history100 = [];
-let lastHeat = [];
-let macroSector = [];
+let history100=[], macroSector=[];
 
 function analyzeNumbers(){
   const raw = document.getElementById("numbersInput").value;
@@ -59,7 +48,7 @@ function analyzeNumbers(){
   if(!nums || nums.length<100) return alert("Paste at least 100 numbers");
 
   history100 = nums.slice(-100);
-  document.getElementById("status").innerText = "Analyzing last 100 numbers…";
+  document.getElementById("status").innerText="Analyzing last 100 numbers…";
 
   runMacroEngine(history100);
 }
@@ -70,34 +59,33 @@ function runMacroEngine(history){
     const idx = wheel.indexOf(n);
     for(let i=-2;i<=2;i++) heat[(idx+i+37)%37]++;
   });
-  lastHeat = heat;
 
-  // Highly probable macro sector: top 3 numbers
   const sortedHeat = heat.map((v,i)=>({num: wheel[i], heat:v})).sort((a,b)=>b.heat-a.heat);
   macroSector = sortedHeat.slice(0,3).map(x=>x.num);
   document.getElementById("macroSector").innerHTML = "<b>Macro Sector (Top 3):</b> " + macroSector.join(", ");
 
-  drawHeatmap(heat);
-  updateSmartPrediction();
+  computeProbability(history, heat);
+  drawMiniWheel(sortedHeat.slice(0,10));
 }
 
-function updateSmartPrediction(){
-  if(history100.length===0) return;
-
-  // Frequency scoring
+function computeProbability(history, heat){
   const freq = {};
-  history100.forEach(n=>freq[n]=(freq[n]||0)+1);
+  history.forEach(n => freq[n] = (freq[n] || 0) + 1);
 
   const scores = {};
   for(let n=0;n<=36;n++){
-    scores[n] = freq[n] || 0;
+    const idx = wheel.indexOf(n);
+    const neighborScore = (freq[wheel[(idx-1+37)%37]] || 0) + (freq[wheel[(idx+1)%37]] || 0);
+    scores[n] = (freq[n] || 0) + 0.5*neighborScore;
   }
 
-  // Top 3 numbers overall
-  const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
-  const topNumbers = sorted.slice(0,3).map(x=>Number(x[0]));
+  const totalScore = Object.values(scores).reduce((a,b)=>a+b,0);
+  const probability = {};
+  for(let n=0;n<=36;n++) probability[n] = ((scores[n]/totalScore)*100).toFixed(1);
 
-  // Neighbors only for top numbers
+  const sortedScores = Object.entries(probability).sort((a,b)=>b[1]-a[1]);
+  const topNumbers = sortedScores.slice(0,10).map(x=>Number(x[0]));
+
   const neighbors = [];
   topNumbers.forEach(n=>{
     const idx = wheel.indexOf(n);
@@ -105,35 +93,41 @@ function updateSmartPrediction(){
     neighbors.push(wheel[(idx+1)%37]);
   });
 
-  // Final prediction: top numbers + neighbors
-  const finalPrediction = [...new Set([...topNumbers,...neighbors])];
+  document.getElementById("topNumbers").innerHTML="<b>Top 10 Numbers:</b> "+topNumbers.join(", ");
+  document.getElementById("neighbors").innerHTML="<b>Neighbors:</b> "+neighbors.join(", ");
 
-  document.getElementById("topNumbers").innerHTML = "<b>Top Numbers:</b> "+topNumbers.join(", ");
-  document.getElementById("neighbors").innerHTML = "<b>Neighbors:</b> "+neighbors.join(", ");
-  document.getElementById("prediction").innerHTML = "<b>Final Focused Prediction:</b> "+finalPrediction.join(", ");
-
-  // Stake & Risk
-  const bankroll = 100;
-  const strength = finalPrediction.length<=3 ? 0.06 : 0.03;
-  const stake = Math.max(1, Math.floor(bankroll*strength));
-  document.getElementById("stake").innerHTML = "Suggested Flat Stake: <b>"+stake+" units</b>";
-
-  const decay = finalPrediction.filter(n=>topNumbers.includes(n)).length<2;
-  document.getElementById("risk").innerHTML = decay ? "⚠️ Weak confirmation – reduce/skip" : "✅ Sector confirmed – playable";
+  let barsHTML="<b>Probabilities:</b><br>";
+  sortedScores.slice(0,10).forEach(([n,p])=>{
+    const color = p>10?'#b00':p>5?'#f90':'#444';
+    barsHTML += `<div style="display:flex;align-items:center;margin:2px 0;"><span style="width:30px">${n}</span><div style="height:18px;background:${color};width:${p*2}%"></div><span style="margin-left:4px">${p}%</span></div>`;
+  });
+  document.getElementById("probability").innerHTML=barsHTML;
 }
 
-function drawHeatmap(heat){
-  const el=document.getElementById("heatmap");
-  el.innerHTML="";
-  const max=Math.max(...heat);
-  heat.forEach((h,i)=>{
-    const s=document.createElement("span");
-    s.innerText=wheel[i];
-    if(h>max*0.7) s.className="hot";
-    else if(h>max*0.4) s.className="warm";
-    else s.className="cold";
-    el.appendChild(s);
-  });
+function drawMiniWheel(top10){
+  const canvas=document.getElementById("miniWheel");
+  const ctx=canvas.getContext("2d");
+  const radius=canvas.width/2-20;
+  const cx=canvas.width/2, cy=canvas.height/2;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const angleStep = 2*Math.PI/37;
+  for(let i=0;i<37;i++){
+    const ang = i*angleStep - Math.PI/2;
+    const x = cx + radius*Math.cos(ang);
+    const y = cy + radius*Math.sin(ang);
+    ctx.beginPath();
+    ctx.arc(x,y,12,0,2*Math.PI);
+    const n = wheel[i];
+    if(top10.map(t=>t[0]).includes(n)) ctx.fillStyle='#b00';
+    else ctx.fillStyle='#444';
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.font='12px Arial';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(n,x,y);
+  }
 }
 </script>
 </body>
