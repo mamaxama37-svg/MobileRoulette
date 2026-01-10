@@ -1,252 +1,215 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Roulette Analyzer</title>
+<title>Professional Roulette Sector Analyzer</title>
 
 <style>
-body { background: #000; color: #fff; font-family: Arial, sans-serif; margin:0; padding:0; text-align:center;}
-header { background: #111; padding:10px; font-size:1.4em;}
-button { padding:10px 15px; font-size:1em; margin:5px; background:#0a84ff; color:#fff; border:none; border-radius:6px;}
-input { width:60%; margin:5px; padding:5px; border-radius:4px; border:none;}
-#statsContainer { display:flex; flex-wrap:wrap; justify-content:space-around; margin:10px; }
-.statBox { background:#222; padding:10px; margin:5px; border-radius:6px; flex:1 1 45%; min-width:140px; }
-#tableSelectorContainer, #analyzerContainer { margin-top:10px; }
-#lobbyFrame { width:100%; height:400px; border:1px solid #fff; }
-#tableContainer { position: relative; width:100%; height:400px; margin-top:10px;}
-#rouletteTable { width:100%; height:100%; border:none; }
-#highlightBox { position:absolute; border:3px solid #ff0; background:rgba(255,255,0,0.2); display:none; pointer-events:none; transition:all 0.1s ease; }
-#ballMarker { position:absolute; width:12px; height:12px; border-radius:50%; background:red; pointer-events:none; display:none; transition:left 0.05s linear, top 0.05s linear;}
+body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
+header { background:#111; padding:12px; font-size:1.3em; }
+#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
+button { padding:8px 12px; margin:6px; font-size:1em; }
+input { width:42px; padding:4px; margin:2px; }
+#heatmap span {
+  display:inline-block; width:28px; margin:2px; padding:4px;
+  border-radius:4px; font-size:0.9em;
+}
+.hot { background:#b00; }
+.warm { background:#665500; }
+.cold { background:#222; }
 </style>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </head>
+
 <body>
 
-<header>Mobile Roulette Analyzer</header>
+<header>Professional Roulette Sector Analyzer</header>
 
-<!-- Step 1: Lobby URL Input -->
-<div>
-<label for="lobbyURL">Casino Lobby / Demo URL:</label><br>
-<input id="lobbyURL" type="url" placeholder="Paste lobby URL here">
-<button onclick="loadLobby()">Load Lobby</button>
+<!-- SCREENSHOT OCR -->
+<div id="box">
+<b>1️⃣ Upload Screenshot (≈500 numbers)</b><br>
+<input type="file" accept="image/*" id="img">
+<button onclick="analyzeScreenshot()">Analyze Screenshot</button>
 </div>
 
-<!-- Step 2: Table Selector -->
-<div id="tableSelectorContainer" style="display:none;">
-  <p>Select your roulette table inside the iframe below:</p>
-  <iframe id="lobbyFrame"></iframe>
-  <button onclick="startAnalyzer()">Start Analyzer on Selected Table</button>
+<!-- LAST 14 INPUT -->
+<div id="box">
+<b>2️⃣ Last 14 Results (Manual Momentum)</b><br>
+<div id="last14Inputs"></div>
+<button onclick="analyzeLast14()">Apply Last-14 Filter</button>
 </div>
 
-<!-- Step 3: Analyzer Interface -->
-<div id="analyzerContainer" style="display:none;">
-
-  <!-- Manual Input -->
-  <div>
-    <p>Manual input (backup):</p>
-    <input id="manualNumber" type="number" min="0" max="36">
-    <button onclick="addManual()">Add Number</button>
-  </div>
-
-  <!-- Stats Boxes -->
-  <div id="statsContainer">
-    <div class="statBox" id="lastNumber">Last Number: --</div>
-    <div class="statBox" id="neighbors">Neighbors: --</div>
-    <div class="statBox" id="hotcold">Hot / Cold: --</div>
-    <div class="statBox" id="prediction">Next Prediction: --</div>
-    <div class="statBox" id="speed">Ball Speed: -- rad/s</div>
-  </div>
-
-  <!-- Iframe Table + Overlays -->
-  <div id="tableContainer">
-    <iframe id="rouletteTable"></iframe>
-    <div id="highlightBox"></div>
-    <div id="ballMarker"></div>
-  </div>
-
+<!-- OUTPUT -->
+<div id="box">
+<div id="status">Waiting for data…</div>
+<div id="prediction"></div>
+<div id="stake"></div>
+<div id="risk"></div>
 </div>
+
+<!-- HEATMAP -->
+<div id="box">
+<b>Wheel Heatmap</b>
+<div id="heatmap"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 
 <script>
-// -------------------- Roulette Logic --------------------
-const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
-let history=[], lastNumber=null;
+/* ===== WHEEL MODEL ===== */
+const wheel = [
+0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+30,8,23,10,5,24,16,33,1,20,14,31,9,
+22,18,29,7,28,12,35,3,26
+];
 
-// Manual input
-function addManual(){
-  const val=parseInt(document.getElementById("manualNumber").value);
-  if(!isNaN(val)&&val>=0&&val<=36) registerNumber(val);
+let macroSector = [];
+let last14Sector = [];
+let lastHeat = [];
+
+/* ===== CREATE LAST 14 INPUTS ===== */
+const holder=document.getElementById("last14Inputs");
+for(let i=0;i<14;i++){
+  const inp=document.createElement("input");
+  inp.type="number"; inp.min=0; inp.max=36;
+  holder.appendChild(inp);
 }
 
-// Register number
-function registerNumber(num){
-  if(num===lastNumber) return;
-  lastNumber=num;
-  history.push(num);
-  if(history.length>200) history.shift();
-  updateUI();
+/* ===== SCREENSHOT OCR (500 SPINS) ===== */
+async function analyzeScreenshot(){
+  const file=document.getElementById("img").files[0];
+  if(!file) return alert("Upload screenshot");
+
+  document.getElementById("status").innerText="OCR scanning…";
+
+  const r = await Tesseract.recognize(file,'eng');
+  let nums = r.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+
+  if(!nums || nums.length<100) return alert("Not enough numbers detected");
+
+  nums = nums.map(Number).slice(-500);
+  runMacroEngine(nums);
 }
 
-// Get neighbors
-function getNeighbors(num){
-  const idx=wheel.indexOf(num);
-  let n=[];
-  for(let i=-2;i<=2;i++) n.push(wheel[(idx+i+wheel.length)%wheel.length]);
-  return n;
-}
+/* ===== MACRO SECTOR (500) ===== */
+function runMacroEngine(history){
+  const heat = Array(37).fill(0);
 
-// Hot / cold numbers
-function getHotCold(){
-  const last50=history.slice(-50);
-  let freq={};
-  last50.forEach(n=>freq[n]=(freq[n]||0)+1);
-  const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
-  const hot=sorted.slice(0,5).map(x=>x[0]);
-  const cold=sorted.slice(-5).map(x=>x[0]);
-  return {hot,cold};
-}
-
-// Predict next number
-function predictNext(){
-  if(lastNumber===null) return "--";
-  const neighbors=getNeighbors(lastNumber);
-  const hc=getHotCold();
-  const candidates=[...new Set([...neighbors,...hc.hot])];
-  return candidates[Math.floor(Math.random()*candidates.length)];
-}
-
-// Update UI
-function updateUI(){
-  document.getElementById("lastNumber").innerText="Last Number: "+lastNumber;
-  document.getElementById("neighbors").innerText="Neighbors: "+getNeighbors(lastNumber).join(", ");
-  const hc=getHotCold();
-  document.getElementById("hotcold").innerText="Hot: "+hc.hot.join(", ")+" | Cold: "+hc.cold.join(", ");
-  document.getElementById("prediction").innerText="Next Prediction: "+predictNext();
-}
-
-// -------------------- Load Lobby --------------------
-function loadLobby(){
-  const url = document.getElementById("lobbyURL").value.trim();
-  if(!url) return alert("Enter a valid URL!");
-  document.getElementById("lobbyFrame").src = url;
-  document.getElementById("tableSelectorContainer").style.display="block";
-}
-
-// -------------------- Start Analyzer --------------------
-function startAnalyzer(){
-  const iframe = document.getElementById("lobbyFrame");
-  document.getElementById("rouletteTable").src = iframe.src;
-  document.getElementById("analyzerContainer").style.display="block";
-  alert("Analyzer ready. If automatic detection fails, use manual input.");
-}
-
-// -------------------- Ball Detection --------------------
-let prevBall=null, prevTime=null, currentSpeed=0;
-function detectBall(ctx){
-  const width=ctx.canvas.width, height=ctx.canvas.height;
-  const data=ctx.getImageData(0,0,width,height).data;
-  for(let y=0; y<height; y+=5){
-    for(let x=0;x<width;x+=5){
-      const i=(y*width+x)*4;
-      const r=data[i],g=data[i+1],b=data[i+2];
-      if(r>200 && g>200 && b>200) return {x,y};
+  history.forEach(n=>{
+    const idx=wheel.indexOf(n);
+    for(let i=-2;i<=2;i++){
+      heat[(idx+i+37)%37]++;
     }
+  });
+
+  lastHeat = heat;
+
+  let best={sum:0,start:0};
+  for(let i=0;i<37;i++){
+    let s=0;
+    for(let j=0;j<10;j++) s+=heat[(i+j)%37];
+    if(s>best.sum) best={sum:s,start:i};
   }
-  return null;
+
+  macroSector=[];
+  for(let i=0;i<10;i++){
+    macroSector.push(wheel[(best.start+i)%37]);
+  }
+
+  document.getElementById("status").innerText =
+    "Macro sector detected: "+macroSector.join(", ");
+
+  drawHeatmap(heat);
+  updateFinalPrediction();
 }
 
-// -------------------- Auto Number Detection --------------------
-function autoDetectNumberRegion(ctx){
-  const width=ctx.canvas.width, height=ctx.canvas.height;
-  const data=ctx.getImageData(0,0,width,height).data;
-  let minX=width, minY=height, maxX=0, maxY=0;
-  for(let y=0;y<height;y+=2){
-    for(let x=0;x<width;x+=2){
-      const i=(y*width+x)*4;
-      const r=data[i], g=data[i+1], b=data[i+2];
-      if(r>200 && g>200 && b>200){
-        if(x<minX) minX=x; if(y<minY) minY=y;
-        if(x>maxX) maxX=x; if(y>maxY) maxY=y;
-      }
+/* ===== LAST 14 MOMENTUM ===== */
+function analyzeLast14(){
+  const inputs=[...document.querySelectorAll("#last14Inputs input")];
+  const nums=inputs.map(i=>Number(i.value)).filter(n=>!isNaN(n));
+  if(nums.length<8) return alert("Enter at least 8 numbers");
+
+  const heat = Array(37).fill(0);
+
+  nums.forEach(n=>{
+    const idx=wheel.indexOf(n);
+    for(let i=-1;i<=1;i++){
+      heat[(idx+i+37)%37]+=2;
     }
+  });
+
+  let best={sum:0,start:0};
+  for(let i=0;i<37;i++){
+    let s=0;
+    for(let j=0;j<7;j++) s+=heat[(i+j)%37];
+    if(s>best.sum) best={sum:s,start:i};
   }
-  if(maxX>minX && maxY>minY) return {numX:minX, numY:minY, numW:maxX-minX+1, numH:maxY-minY+1};
-  return null;
-}
 
-// -------------------- Highlight Overlay --------------------
-function highlightNumber(rect){
-  const iframe=document.getElementById("rouletteTable");
-  const highlight=document.getElementById("highlightBox");
-  if(rect){
-    const iframeRect = iframe.getBoundingClientRect();
-    const scaleX = iframeRect.width / iframe.contentWindow.document.body.scrollWidth;
-    const scaleY = iframeRect.height / iframe.contentWindow.document.body.scrollHeight;
-    highlight.style.left = (rect.numX*scaleX)+"px";
-    highlight.style.top = (rect.numY*scaleY)+"px";
-    highlight.style.width = (rect.numW*scaleX)+"px";
-    highlight.style.height= (rect.numH*scaleY)+"px";
-    highlight.style.display="block";
-  } else highlight.style.display="none";
-}
-
-// -------------------- Track Ball --------------------
-function trackBallMotion(ball){
-  if(!ball) return;
-  const iframe = document.getElementById("rouletteTable");
-  const ballDiv = document.getElementById("ballMarker");
-  const iframeRect = iframe.getBoundingClientRect();
-  const scaleX = iframeRect.width / iframe.contentWindow.document.body.scrollWidth;
-  const scaleY = iframeRect.height / iframe.contentWindow.document.body.scrollHeight;
-  const ballX = ball.x*scaleX;
-  const ballY = ball.y*scaleY;
-  ballDiv.style.left = (ballX-6)+"px";
-  ballDiv.style.top = (ballY-6)+"px";
-  ballDiv.style.display="block";
-  const centerX = iframeRect.width/2;
-  const centerY = iframeRect.height/2;
-  const angle = Math.atan2(ballY-centerY, ballX-centerX);
-  const now = performance.now();
-  if(prevBall && prevTime){
-    const dAngle = angle - prevBall.angle;
-    const dt = (now-prevTime)/1000;
-    currentSpeed = dAngle/dt;
+  last14Sector=[];
+  for(let i=0;i<7;i++){
+    last14Sector.push(wheel[(best.start+i)%37]);
   }
-  prevBall={x:ballX,y:ballY,angle:angle};
-  prevTime=now;
-  document.getElementById("speed").innerText="Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
+
+  document.getElementById("status").innerText =
+    "Last-14 momentum sector: "+last14Sector.join(", ");
+
+  updateFinalPrediction();
 }
 
-// -------------------- Analyze Canvas --------------------
-function analyzeCanvas(ctx){
-  const ball = detectBall(ctx);
-  trackBallMotion(ball);
-  const rect = autoDetectNumberRegion(ctx);
-  highlightNumber(rect);
-  if(rect){
-    const {numX,numY,numW,numH} = rect;
-    const numberRegion = ctx.getImageData(numX,numY,numW,numH);
-    Tesseract.recognize(numberRegion,'eng').then(result=>{
-      const num = parseInt(result.data.text.replace(/\D/g,''));
-      if(!isNaN(num) && num>=0 && num<=36) registerNumber(num);
-    }).catch(err=>console.log("OCR error:", err));
+/* ===== MERGE LOGIC ===== */
+function updateFinalPrediction(){
+  if(macroSector.length===0) return;
+
+  let final=[];
+  if(last14Sector.length>0){
+    const overlap = macroSector.filter(n=>last14Sector.includes(n));
+    if(overlap.length>=5){
+      final = overlap;
+    } else {
+      final = [...new Set([...last14Sector,...macroSector])].slice(0,10);
+    }
+  } else {
+    final = macroSector;
   }
+
+  document.getElementById("prediction").innerHTML =
+    "<b>FINAL BET SECTOR:</b><br>"+final.join(", ");
+
+  stakeAndRisk(final);
 }
 
-// -------------------- Capture Screen --------------------
-function captureTableScreen(){
-  const iframe=document.getElementById("rouletteTable");
-  try{
-    html2canvas(iframe.contentDocument.body).then(canvas=>{
-      analyzeCanvas(canvas.getContext("2d"));
-    });
-  } catch(err){console.log("Cannot capture iframe (CORS)",err);}
+/* ===== STAKE & RISK ===== */
+function stakeAndRisk(final){
+  const bankroll=100;
+  const strength=final.length<=6 ? 0.06 : 0.03;
+  const stake=Math.max(1,Math.floor(bankroll*strength));
+
+  document.getElementById("stake").innerHTML =
+    "Suggested Flat Stake: <b>"+stake+" units</b>";
+
+  const decay = last14Sector.length>0 &&
+    final.filter(n=>last14Sector.includes(n)).length<3;
+
+  document.getElementById("risk").innerHTML =
+    decay ? "⚠️ Weak confirmation – reduce or skip"
+          : "✅ Sector confirmed – playable";
 }
 
-// -------------------- Repeat --------------------
-setInterval(captureTableScreen,1000);
+/* ===== HEATMAP ===== */
+function drawHeatmap(heat){
+  const el=document.getElementById("heatmap");
+  el.innerHTML="";
+  const max=Math.max(...heat);
+  heat.forEach((h,i)=>{
+    const s=document.createElement("span");
+    s.innerText=wheel[i];
+    if(h>max*0.7) s.className="hot";
+    else if(h>max*0.4) s.className="warm";
+    else s.className="cold";
+    el.appendChild(s);
+  });
+}
 </script>
+
 </body>
 </html>
