@@ -1,215 +1,65 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Professional Roulette Sector Analyzer</title>
+<title>Mobile Roulette Sector Analyzer</title>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
-header { background:#111; padding:12px; font-size:1.3em; }
-#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-button { padding:8px 12px; margin:6px; font-size:1em; }
-input { width:42px; padding:4px; margin:2px; }
-#heatmap span {
-  display:inline-block; width:28px; margin:2px; padding:4px;
-  border-radius:4px; font-size:0.9em;
+body{
+  background:#0d0d0d;
+  color:#eee;
+  font-family:Arial, sans-serif;
+  padding:12px;
 }
-.hot { background:#b00; }
-.warm { background:#665500; }
-.cold { background:#222; }
+h2{text-align:center;}
+input,button{
+  width:100%;
+  padding:12px;
+  margin-top:8px;
+  font-size:16px;
+}
+button{
+  background:#00ff99;
+  border:none;
+  font-weight:bold;
+}
+#panel{
+  background:#1a1a1a;
+  padding:12px;
+  margin-top:10px;
+  border-radius:6px;
+}
+.status{color:#00ff99;}
+.wait{color:#ff5555;}
 </style>
 </head>
 
 <body>
 
-<header>Professional Roulette Sector Analyzer</header>
+<h2>🎰 Professional Roulette Analyzer</h2>
 
-<!-- SCREENSHOT OCR -->
-<div id="box">
-<b>1️⃣ Upload Screenshot (≈500 numbers)</b><br>
-<input type="file" accept="image/*" id="img">
-<button onclick="analyzeScreenshot()">Analyze Screenshot</button>
+<input type="file" accept="image/*" onchange="processImage(this)">
+
+<div id="panel">
+<b>Status:</b>
+<div id="status">Waiting for screenshot…</div><br>
+
+<b>Auto Last 14 Spins:</b>
+<div id="last14">--</div><br>
+
+<b>Macro Sector (100 spins):</b>
+<div id="macro">--</div><br>
+
+<b>Final Bet Sector:</b>
+<div id="final">--</div><br>
+
+<b>Confidence:</b>
+<div id="confidence">--</div>
 </div>
 
-<!-- LAST 14 INPUT -->
-<div id="box">
-<b>2️⃣ Last 14 Results (Manual Momentum)</b><br>
-<div id="last14Inputs"></div>
-<button onclick="analyzeLast14()">Apply Last-14 Filter</button>
-</div>
-
-<!-- OUTPUT -->
-<div id="box">
-<div id="status">Waiting for data…</div>
-<div id="prediction"></div>
-<div id="stake"></div>
-<div id="risk"></div>
-</div>
-
-<!-- HEATMAP -->
-<div id="box">
-<b>Wheel Heatmap</b>
-<div id="heatmap"></div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
-
-<script>
-/* ===== WHEEL MODEL ===== */
-const wheel = [
-0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,
-22,18,29,7,28,12,35,3,26
-];
-
-let macroSector = [];
-let last14Sector = [];
-let lastHeat = [];
-
-/* ===== CREATE LAST 14 INPUTS ===== */
-const holder=document.getElementById("last14Inputs");
-for(let i=0;i<14;i++){
-  const inp=document.createElement("input");
-  inp.type="number"; inp.min=0; inp.max=36;
-  holder.appendChild(inp);
-}
-
-/* ===== SCREENSHOT OCR (500 SPINS) ===== */
-async function analyzeScreenshot(){
-  const file=document.getElementById("img").files[0];
-  if(!file) return alert("Upload screenshot");
-
-  document.getElementById("status").innerText="OCR scanning…";
-
-  const r = await Tesseract.recognize(file,'eng');
-  let nums = r.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-
-  if(!nums || nums.length<100) return alert("Not enough numbers detected");
-
-  nums = nums.map(Number).slice(-500);
-  runMacroEngine(nums);
-}
-
-/* ===== MACRO SECTOR (500) ===== */
-function runMacroEngine(history){
-  const heat = Array(37).fill(0);
-
-  history.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    for(let i=-2;i<=2;i++){
-      heat[(idx+i+37)%37]++;
-    }
-  });
-
-  lastHeat = heat;
-
-  let best={sum:0,start:0};
-  for(let i=0;i<37;i++){
-    let s=0;
-    for(let j=0;j<10;j++) s+=heat[(i+j)%37];
-    if(s>best.sum) best={sum:s,start:i};
-  }
-
-  macroSector=[];
-  for(let i=0;i<10;i++){
-    macroSector.push(wheel[(best.start+i)%37]);
-  }
-
-  document.getElementById("status").innerText =
-    "Macro sector detected: "+macroSector.join(", ");
-
-  drawHeatmap(heat);
-  updateFinalPrediction();
-}
-
-/* ===== LAST 14 MOMENTUM ===== */
-function analyzeLast14(){
-  const inputs=[...document.querySelectorAll("#last14Inputs input")];
-  const nums=inputs.map(i=>Number(i.value)).filter(n=>!isNaN(n));
-  if(nums.length<8) return alert("Enter at least 8 numbers");
-
-  const heat = Array(37).fill(0);
-
-  nums.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    for(let i=-1;i<=1;i++){
-      heat[(idx+i+37)%37]+=2;
-    }
-  });
-
-  let best={sum:0,start:0};
-  for(let i=0;i<37;i++){
-    let s=0;
-    for(let j=0;j<7;j++) s+=heat[(i+j)%37];
-    if(s>best.sum) best={sum:s,start:i};
-  }
-
-  last14Sector=[];
-  for(let i=0;i<7;i++){
-    last14Sector.push(wheel[(best.start+i)%37]);
-  }
-
-  document.getElementById("status").innerText =
-    "Last-14 momentum sector: "+last14Sector.join(", ");
-
-  updateFinalPrediction();
-}
-
-/* ===== MERGE LOGIC ===== */
-function updateFinalPrediction(){
-  if(macroSector.length===0) return;
-
-  let final=[];
-  if(last14Sector.length>0){
-    const overlap = macroSector.filter(n=>last14Sector.includes(n));
-    if(overlap.length>=5){
-      final = overlap;
-    } else {
-      final = [...new Set([...last14Sector,...macroSector])].slice(0,10);
-    }
-  } else {
-    final = macroSector;
-  }
-
-  document.getElementById("prediction").innerHTML =
-    "<b>FINAL BET SECTOR:</b><br>"+final.join(", ");
-
-  stakeAndRisk(final);
-}
-
-/* ===== STAKE & RISK ===== */
-function stakeAndRisk(final){
-  const bankroll=100;
-  const strength=final.length<=6 ? 0.06 : 0.03;
-  const stake=Math.max(1,Math.floor(bankroll*strength));
-
-  document.getElementById("stake").innerHTML =
-    "Suggested Flat Stake: <b>"+stake+" units</b>";
-
-  const decay = last14Sector.length>0 &&
-    final.filter(n=>last14Sector.includes(n)).length<3;
-
-  document.getElementById("risk").innerHTML =
-    decay ? "⚠️ Weak confirmation – reduce or skip"
-          : "✅ Sector confirmed – playable";
-}
-
-/* ===== HEATMAP ===== */
-function drawHeatmap(heat){
-  const el=document.getElementById("heatmap");
-  el.innerHTML="";
-  const max=Math.max(...heat);
-  heat.forEach((h,i)=>{
-    const s=document.createElement("span");
-    s.innerText=wheel[i];
-    if(h>max*0.7) s.className="hot";
-    else if(h>max*0.4) s.className="warm";
-    else s.className="cold";
-    el.appendChild(s);
-  });
-}
-</script>
-
+<script src="script.js"></script>
 </body>
 </html>
