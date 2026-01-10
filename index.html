@@ -4,25 +4,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mobile Roulette Analyzer</title>
+
+<!-- Styles -->
 <style>
 body { background: #000; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; text-align: center; }
 header { background: #111; padding: 10px; font-size: 1.4em; }
 button { padding: 10px 15px; font-size: 1em; margin: 10px; background: #0a84ff; color: #fff; border: none; border-radius: 6px; }
 #statsContainer { display: flex; flex-wrap: wrap; justify-content: space-around; margin: 10px; }
 .statBox { background: #222; padding: 10px; margin: 5px; border-radius: 6px; flex: 1 1 45%; min-width: 140px; }
-input { width: 60px; }
+input { width: 60px; margin:5px; }
 </style>
+
+<!-- html2canvas library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
 </head>
 <body>
 
 <header>Mobile Roulette Analyzer</header>
 
+<!-- Manual Input Backup -->
 <div>
 <p>Manual input (backup):</p>
 <input id="manualNumber" type="number" min="0" max="36">
 <button onclick="addManual()">Add Number</button>
 </div>
 
+<!-- Stats Boxes -->
 <div id="statsContainer">
 <div class="statBox" id="lastNumber">Last Number: --</div>
 <div class="statBox" id="neighbors">Neighbors: --</div>
@@ -31,14 +39,17 @@ input { width: 60px; }
 </div>
 
 <script>
+// --- Roulette Logic ---
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
-let history=[],lastNumber=null;
+let history=[], lastNumber=null;
 
+// Manual input
 function addManual(){
   const val=parseInt(document.getElementById("manualNumber").value);
   if(!isNaN(val)&&val>=0&&val<=36) registerNumber(val);
 }
 
+// Register number
 function registerNumber(num){
   if(num===lastNumber) return;
   lastNumber=num;
@@ -47,6 +58,7 @@ function registerNumber(num){
   updateUI();
 }
 
+// Get neighbors
 function getNeighbors(num){
   const idx=wheel.indexOf(num);
   let n=[];
@@ -54,6 +66,7 @@ function getNeighbors(num){
   return n;
 }
 
+// Hot / cold numbers
 function getHotCold(){
   const last50=history.slice(-50);
   let freq={};
@@ -64,6 +77,7 @@ function getHotCold(){
   return {hot,cold};
 }
 
+// Predict next number
 function predictNext(){
   if(lastNumber===null) return "--";
   const neighbors=getNeighbors(lastNumber);
@@ -72,6 +86,7 @@ function predictNext(){
   return candidates[Math.floor(Math.random()*candidates.length)];
 }
 
+// Update UI
 function updateUI(){
   document.getElementById("lastNumber").innerText="Last Number: "+lastNumber;
   document.getElementById("neighbors").innerText="Neighbors: "+getNeighbors(lastNumber).join(", ");
@@ -79,6 +94,23 @@ function updateUI(){
   document.getElementById("hotcold").innerText="Hot: "+hc.hot.join(", ")+" | Cold: "+hc.cold.join(", ");
   document.getElementById("prediction").innerText="Next Prediction: "+predictNext();
 }
+
+// --- Screen Capture Logic ---
+function captureScreen(){
+  html2canvas(document.body).then(canvas=>{
+    const ctx=canvas.getContext('2d');
+    analyzeCanvas(ctx);
+  });
+}
+
+// Example analysis (placeholder)
+function analyzeCanvas(ctx){
+  // Here you can read pixels/colors from ctx to detect numbers/ball
+  console.log("Screen captured. Ready for pixel analysis.");
+}
+
+// Repeat every 1 second
+setInterval(captureScreen, 1000);
 </script>
 
 </body>
