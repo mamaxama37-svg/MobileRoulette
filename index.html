@@ -6,31 +6,18 @@
 <title>Mobile Roulette Analyzer</title>
 
 <style>
-body { background: #000; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; text-align: center; }
-header { background: #111; padding: 10px; font-size: 1.4em; }
-button { padding: 10px 15px; font-size: 1em; margin: 5px; background: #0a84ff; color: #fff; border: none; border-radius: 6px; }
-#statsContainer { display: flex; flex-wrap: wrap; justify-content: space-around; margin: 10px; }
-.statBox { background: #222; padding: 10px; margin: 5px; border-radius: 6px; flex: 1 1 45%; min-width: 140px; }
-input { width: 60%; margin:5px; padding:5px; border-radius:4px; border:none; }
-#tableContainer { position: relative; width: 100%; height: 400px; margin-top: 10px; }
-#rouletteTable { width: 100%; height: 100%; border: none; }
-#highlightBox {
-  position: absolute;
-  border: 3px solid #ff0;
-  background: rgba(255,255,0,0.2);
-  display: none;
-  pointer-events: none;
-  transition: all 0.1s ease;
-}
-#ballMarker {
-  position:absolute;
-  width:12px; height:12px;
-  border-radius:50%;
-  background:red;
-  pointer-events:none;
-  display:none;
-  transition: left 0.05s linear, top 0.05s linear;
-}
+body { background: #000; color: #fff; font-family: Arial, sans-serif; margin:0; padding:0; text-align:center;}
+header { background: #111; padding:10px; font-size:1.4em;}
+button { padding:10px 15px; font-size:1em; margin:5px; background:#0a84ff; color:#fff; border:none; border-radius:6px;}
+input { width:60%; margin:5px; padding:5px; border-radius:4px; border:none;}
+#statsContainer { display:flex; flex-wrap:wrap; justify-content:space-around; margin:10px; }
+.statBox { background:#222; padding:10px; margin:5px; border-radius:6px; flex:1 1 45%; min-width:140px; }
+#tableSelectorContainer, #analyzerContainer { margin-top:10px; }
+#lobbyFrame { width:100%; height:400px; border:1px solid #fff; }
+#tableContainer { position: relative; width:100%; height:400px; margin-top:10px;}
+#rouletteTable { width:100%; height:100%; border:none; }
+#highlightBox { position:absolute; border:3px solid #ff0; background:rgba(255,255,0,0.2); display:none; pointer-events:none; transition:all 0.1s ease; }
+#ballMarker { position:absolute; width:12px; height:12px; border-radius:50%; background:red; pointer-events:none; display:none; transition:left 0.05s linear, top 0.05s linear;}
 </style>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -40,34 +27,46 @@ input { width: 60%; margin:5px; padding:5px; border-radius:4px; border:none; }
 
 <header>Mobile Roulette Analyzer</header>
 
-<!-- Live URL Input -->
+<!-- Step 1: Lobby URL Input -->
 <div>
-<label for="liveURL">Live Roulette URL:</label><br>
-<input id="liveURL" type="url" placeholder="Paste live roulette URL here">
-<button onclick="loadLiveTable()">Load Table</button>
+<label for="lobbyURL">Casino Lobby / Demo URL:</label><br>
+<input id="lobbyURL" type="url" placeholder="Paste lobby URL here">
+<button onclick="loadLobby()">Load Lobby</button>
 </div>
 
-<!-- Manual Input Backup -->
-<div>
-<p>Manual input (backup):</p>
-<input id="manualNumber" type="number" min="0" max="36">
-<button onclick="addManual()">Add Number</button>
+<!-- Step 2: Table Selector -->
+<div id="tableSelectorContainer" style="display:none;">
+  <p>Select your roulette table inside the iframe below:</p>
+  <iframe id="lobbyFrame"></iframe>
+  <button onclick="startAnalyzer()">Start Analyzer on Selected Table</button>
 </div>
 
-<!-- Stats Boxes -->
-<div id="statsContainer">
-<div class="statBox" id="lastNumber">Last Number: --</div>
-<div class="statBox" id="neighbors">Neighbors: --</div>
-<div class="statBox" id="hotcold">Hot / Cold: --</div>
-<div class="statBox" id="prediction">Next Prediction: --</div>
-<div class="statBox" id="speed">Ball Speed: -- rad/s</div>
-</div>
+<!-- Step 3: Analyzer Interface -->
+<div id="analyzerContainer" style="display:none;">
 
-<!-- Iframe and Overlay -->
-<div id="tableContainer">
-  <iframe id="rouletteTable" src=""></iframe>
-  <div id="highlightBox"></div>
-  <div id="ballMarker"></div>
+  <!-- Manual Input -->
+  <div>
+    <p>Manual input (backup):</p>
+    <input id="manualNumber" type="number" min="0" max="36">
+    <button onclick="addManual()">Add Number</button>
+  </div>
+
+  <!-- Stats Boxes -->
+  <div id="statsContainer">
+    <div class="statBox" id="lastNumber">Last Number: --</div>
+    <div class="statBox" id="neighbors">Neighbors: --</div>
+    <div class="statBox" id="hotcold">Hot / Cold: --</div>
+    <div class="statBox" id="prediction">Next Prediction: --</div>
+    <div class="statBox" id="speed">Ball Speed: -- rad/s</div>
+  </div>
+
+  <!-- Iframe Table + Overlays -->
+  <div id="tableContainer">
+    <iframe id="rouletteTable"></iframe>
+    <div id="highlightBox"></div>
+    <div id="ballMarker"></div>
+  </div>
+
 </div>
 
 <script>
@@ -127,158 +126,127 @@ function updateUI(){
   document.getElementById("prediction").innerText="Next Prediction: "+predictNext();
 }
 
-// -------------------- Load Live Table --------------------
-function loadLiveTable(){
-  const url = document.getElementById("liveURL").value.trim();
-  if(url){
-    document.getElementById("rouletteTable").src = url;
-    console.log("Loaded live table:", url);
-  } else {
-    alert("Please enter a valid URL!");
-  }
+// -------------------- Load Lobby --------------------
+function loadLobby(){
+  const url = document.getElementById("lobbyURL").value.trim();
+  if(!url) return alert("Enter a valid URL!");
+  document.getElementById("lobbyFrame").src = url;
+  document.getElementById("tableSelectorContainer").style.display="block";
 }
 
-// -------------------- Automatic Ball Detection --------------------
-function detectBall(ctx){
-  const width = ctx.canvas.width;
-  const height = ctx.canvas.height;
-  const data = ctx.getImageData(0,0,width,height).data;
+// -------------------- Start Analyzer --------------------
+function startAnalyzer(){
+  const iframe = document.getElementById("lobbyFrame");
+  document.getElementById("rouletteTable").src = iframe.src;
+  document.getElementById("analyzerContainer").style.display="block";
+  alert("Analyzer ready. If automatic detection fails, use manual input.");
+}
 
+// -------------------- Ball Detection --------------------
+let prevBall=null, prevTime=null, currentSpeed=0;
+function detectBall(ctx){
+  const width=ctx.canvas.width, height=ctx.canvas.height;
+  const data=ctx.getImageData(0,0,width,height).data;
   for(let y=0; y<height; y+=5){
-    for(let x=0; x<width; x+=5){
-      const i = (y*width + x)*4;
-      const r = data[i], g = data[i+1], b = data[i+2];
-      if(r>200 && g>200 && b>200){ // bright ball
-        return {x,y};
-      }
+    for(let x=0;x<width;x+=5){
+      const i=(y*width+x)*4;
+      const r=data[i],g=data[i+1],b=data[i+2];
+      if(r>200 && g>200 && b>200) return {x,y};
     }
   }
   return null;
 }
 
-// -------------------- Automatic Number Detection --------------------
+// -------------------- Auto Number Detection --------------------
 function autoDetectNumberRegion(ctx){
-  const width = ctx.canvas.width;
-  const height = ctx.canvas.height;
-  const data = ctx.getImageData(0,0,width,height).data;
-
+  const width=ctx.canvas.width, height=ctx.canvas.height;
+  const data=ctx.getImageData(0,0,width,height).data;
   let minX=width, minY=height, maxX=0, maxY=0;
-  const step=2;
-
-  for(let y=0;y<height;y+=step){
-    for(let x=0;x<width;x+=step){
-      const i=(y*width + x)*4;
+  for(let y=0;y<height;y+=2){
+    for(let x=0;x<width;x+=2){
+      const i=(y*width+x)*4;
       const r=data[i], g=data[i+1], b=data[i+2];
       if(r>200 && g>200 && b>200){
-        if(x<minX) minX=x;
-        if(y<minY) minY=y;
-        if(x>maxX) maxX=x;
-        if(y>maxY) maxY=y;
+        if(x<minX) minX=x; if(y<minY) minY=y;
+        if(x>maxX) maxX=x; if(y>maxY) maxY=y;
       }
     }
   }
-
-  if(maxX>minX && maxY>minY){
-    return {numX:minX, numY:minY, numW:maxX-minX+1, numH:maxY-minY+1};
-  }
+  if(maxX>minX && maxY>minY) return {numX:minX, numY:minY, numW:maxX-minX+1, numH:maxY-minY+1};
   return null;
 }
 
 // -------------------- Highlight Overlay --------------------
 function highlightNumber(rect){
-  const iframe = document.getElementById("rouletteTable");
-  const highlight = document.getElementById("highlightBox");
+  const iframe=document.getElementById("rouletteTable");
+  const highlight=document.getElementById("highlightBox");
   if(rect){
     const iframeRect = iframe.getBoundingClientRect();
     const scaleX = iframeRect.width / iframe.contentWindow.document.body.scrollWidth;
     const scaleY = iframeRect.height / iframe.contentWindow.document.body.scrollHeight;
-
-    highlight.style.left = (rect.numX * scaleX) + "px";
-    highlight.style.top  = (rect.numY * scaleY) + "px";
-    highlight.style.width  = (rect.numW * scaleX) + "px";
-    highlight.style.height = (rect.numH * scaleY) + "px";
-    highlight.style.display = "block";
-  } else {
-    highlight.style.display = "none";
-  }
+    highlight.style.left = (rect.numX*scaleX)+"px";
+    highlight.style.top = (rect.numY*scaleY)+"px";
+    highlight.style.width = (rect.numW*scaleX)+"px";
+    highlight.style.height= (rect.numH*scaleY)+"px";
+    highlight.style.display="block";
+  } else highlight.style.display="none";
 }
 
-// -------------------- Ball Tracking --------------------
-let prevBall = null;
-let prevTime = null;
-let currentSpeed = 0;
-
+// -------------------- Track Ball --------------------
 function trackBallMotion(ball){
   if(!ball) return;
   const iframe = document.getElementById("rouletteTable");
   const ballDiv = document.getElementById("ballMarker");
-
   const iframeRect = iframe.getBoundingClientRect();
   const scaleX = iframeRect.width / iframe.contentWindow.document.body.scrollWidth;
   const scaleY = iframeRect.height / iframe.contentWindow.document.body.scrollHeight;
-
-  const ballX = ball.x * scaleX;
-  const ballY = ball.y * scaleY;
-
-  ballDiv.style.left = (ballX-6) + "px";
-  ballDiv.style.top  = (ballY-6) + "px";
-  ballDiv.style.display = "block";
-
+  const ballX = ball.x*scaleX;
+  const ballY = ball.y*scaleY;
+  ballDiv.style.left = (ballX-6)+"px";
+  ballDiv.style.top = (ballY-6)+"px";
+  ballDiv.style.display="block";
   const centerX = iframeRect.width/2;
   const centerY = iframeRect.height/2;
-  const angle = Math.atan2(ballY - centerY, ballX - centerX);
-
+  const angle = Math.atan2(ballY-centerY, ballX-centerX);
   const now = performance.now();
   if(prevBall && prevTime){
     const dAngle = angle - prevBall.angle;
     const dt = (now-prevTime)/1000;
     currentSpeed = dAngle/dt;
   }
-
-  prevBall = {x:ballX, y:ballY, angle:angle};
-  prevTime = now;
-
-  document.getElementById("speed").innerText = "Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
+  prevBall={x:ballX,y:ballY,angle:angle};
+  prevTime=now;
+  document.getElementById("speed").innerText="Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
 }
 
 // -------------------- Analyze Canvas --------------------
 function analyzeCanvas(ctx){
   const ball = detectBall(ctx);
   trackBallMotion(ball);
-
   const rect = autoDetectNumberRegion(ctx);
   highlightNumber(rect);
-
   if(rect){
     const {numX,numY,numW,numH} = rect;
     const numberRegion = ctx.getImageData(numX,numY,numW,numH);
-
-    Tesseract.recognize(numberRegion,'eng')
-      .then(result=>{
-        const num = parseInt(result.data.text.replace(/\D/g,''));
-        if(!isNaN(num) && num>=0 && num<=36){
-          registerNumber(num);
-        }
-      }).catch(err=>console.log("OCR error:", err));
+    Tesseract.recognize(numberRegion,'eng').then(result=>{
+      const num = parseInt(result.data.text.replace(/\D/g,''));
+      if(!isNaN(num) && num>=0 && num<=36) registerNumber(num);
+    }).catch(err=>console.log("OCR error:", err));
   }
 }
 
-// -------------------- Capture Iframe Screen --------------------
+// -------------------- Capture Screen --------------------
 function captureTableScreen(){
-  const iframe = document.getElementById("rouletteTable");
+  const iframe=document.getElementById("rouletteTable");
   try{
     html2canvas(iframe.contentDocument.body).then(canvas=>{
-      const ctx = canvas.getContext("2d");
-      analyzeCanvas(ctx);
+      analyzeCanvas(canvas.getContext("2d"));
     });
-  } catch(err){
-    console.log("Cannot capture iframe (CORS issue)", err);
-  }
+  } catch(err){console.log("Cannot capture iframe (CORS)",err);}
 }
 
-// -------------------- Repeat Every Second --------------------
-setInterval(captureTableScreen, 1000);
-
+// -------------------- Repeat --------------------
+setInterval(captureTableScreen,1000);
 </script>
 </body>
 </html>
