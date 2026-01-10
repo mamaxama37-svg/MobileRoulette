@@ -1,134 +1,149 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Roulette Dashboard – Mini Wheel</title>
+<title>Live Mobile Roulette Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
+body { background:#000; color:#fff; font-family:Arial; text-align:center; margin:0; padding:0; }
 header { background:#111; padding:12px; font-size:1.3em; }
-#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-textarea { width:90%; height:120px; margin:4px; padding:6px; font-size:1em; resize:none; }
+#controls { margin:10px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
-canvas { background:#111; border:2px solid #555; border-radius:50%; margin:10px auto; display:block; }
-.info { margin-top:6px; font-size:0.95em; }
+canvas { display:block; margin:auto; border:2px solid #555; border-radius:50%; background:#111; }
+.tooltip { position:absolute; background:#222; color:#fff; padding:6px 8px; border-radius:6px; font-size:0.9em; display:none; pointer-events:none; }
+.info { margin-top:6px; font-size:0.9em; width:90%; margin:auto; text-align:left; }
 </style>
 </head>
 <body>
 
-<header>Pro Roulette Dashboard – Mini Wheel</header>
+<header>Live Mobile Roulette Analyzer</header>
 
-<div id="box">
-<b>Paste Last 100 Numbers</b><br>
-<textarea id="numbersInput" placeholder="0,32,15,..."></textarea><br>
-<button onclick="analyzeNumbers()">Analyze</button>
+<div id="controls">
+<button onclick="captureScreen()">Capture Screen & Analyze</button>
 </div>
 
-<div id="box">
-<div id="status">Waiting for input…</div>
-<div id="macroSector"></div>
-<div id="topNumbers"></div>
-<div id="neighbors"></div>
-<div class="info" id="probability"></div>
-</div>
+<canvas id="miniWheel" width="320" height="320"></canvas>
+<div class="tooltip" id="tooltip"></div>
+<div class="info" id="status">Waiting for screen capture…</div>
+<div class="info" id="prediction"></div>
+<div class="info" id="probabilities"></div>
 
-<canvas id="miniWheel" width="300" height="300"></canvas>
-
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+30,8,23,10,5,24,16,33,1,20,14,31,9,
+22,18,29,7,28,12,35,3,26];
 
-let history100=[], macroSector=[];
+let history=[], top3=[], neighbors=[];
+const canvas=document.getElementById("miniWheel");
+const ctx=canvas.getContext("2d");
+const tooltip=document.getElementById("tooltip");
+const cx=canvas.width/2, cy=canvas.height/2, radius=canvas.width/2-20;
 
-function analyzeNumbers(){
-  const raw = document.getElementById("numbersInput").value;
-  if(!raw) return alert("Paste your numbers first");
+// === Step 1: Screen Capture ===
+async function captureScreen(){
+  if(!navigator.mediaDevices.getDisplayMedia){
+    alert("Screen capture not supported on this browser.");
+    return;
+  }
+  try{
+    const stream=await navigator.mediaDevices.getDisplayMedia({video:true});
+    const track=stream.getVideoTracks()[0];
+    const imageCapture=new ImageCapture(track);
+    const bitmap=await imageCapture.grabFrame();
+    track.stop();
 
-  let nums = raw.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g).map(Number);
-  if(!nums || nums.length<100) return alert("Paste at least 100 numbers");
+    // Draw frame to canvas for debugging
+    const tempCanvas=document.createElement("canvas");
+    tempCanvas.width=bitmap.width;
+    tempCanvas.height=bitmap.height;
+    const tempCtx=tempCanvas.getContext("2d");
+    tempCtx.drawImage(bitmap,0,0);
+    analyzeScreenshot(tempCanvas);
 
-  history100 = nums.slice(-100);
-  document.getElementById("status").innerText="Analyzing last 100 numbers…";
-
-  runMacroEngine(history100);
+  } catch(err){
+    alert("Screen capture failed: "+err);
+  }
 }
 
-function runMacroEngine(history){
-  const heat = Array(37).fill(0);
+// === Step 2: OCR Detection ===
+async function analyzeScreenshot(canvasImg){
+  document.getElementById("status").innerText="Analyzing screenshot...";
+  const result=await Tesseract.recognize(canvasImg,'eng');
+  let nums=result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums || nums.length<50){
+    alert("OCR could not detect enough numbers.");
+    return;
+  }
+  history=nums.map(Number).slice(-100);
+  document.getElementById("status").innerText="Numbers detected: "+history.join(",");
+  calculatePredictions();
+}
+
+// === Step 3: Prediction ===
+function calculatePredictions(){
+  const heat=Array(37).fill(0);
   history.forEach(n=>{
-    const idx = wheel.indexOf(n);
+    const idx=wheel.indexOf(n);
     for(let i=-2;i<=2;i++) heat[(idx+i+37)%37]++;
   });
 
-  const sortedHeat = heat.map((v,i)=>({num: wheel[i], heat:v})).sort((a,b)=>b.heat-a.heat);
-  macroSector = sortedHeat.slice(0,3).map(x=>x.num);
-  document.getElementById("macroSector").innerHTML = "<b>Macro Sector (Top 3):</b> " + macroSector.join(", ");
+  const sorted=heat.map((v,i)=>({num:wheel[i],heat:v})).sort((a,b)=>b.heat-a.heat);
+  top3=sorted.slice(0,3).map(x=>x.num);
 
-  computeProbability(history, heat);
-  drawMiniWheel(sortedHeat.slice(0,10));
-}
-
-function computeProbability(history, heat){
-  const freq = {};
-  history.forEach(n => freq[n] = (freq[n] || 0) + 1);
-
-  const scores = {};
-  for(let n=0;n<=36;n++){
-    const idx = wheel.indexOf(n);
-    const neighborScore = (freq[wheel[(idx-1+37)%37]] || 0) + (freq[wheel[(idx+1)%37]] || 0);
-    scores[n] = (freq[n] || 0) + 0.5*neighborScore;
+  // Neighbors max 5
+  const neighborSet=new Set();
+  for(let n of top3){
+    const idx=wheel.indexOf(n);
+    [wheel[(idx-1+37)%37], wheel[(idx+1)%37]].forEach(x=>{
+      if(neighborSet.size<5) neighborSet.add(x);
+    });
   }
+  neighbors=Array.from(neighborSet);
 
-  const totalScore = Object.values(scores).reduce((a,b)=>a+b,0);
-  const probability = {};
-  for(let n=0;n<=36;n++) probability[n] = ((scores[n]/totalScore)*100).toFixed(1);
+  document.getElementById("prediction").innerHTML=
+    "<b>Top 3 Next Numbers:</b> "+top3.join(", ")+"<br>"+
+    "<b>Neighbors (max 5):</b> "+neighbors.join(", ");
 
-  const sortedScores = Object.entries(probability).sort((a,b)=>b[1]-a[1]);
-  const topNumbers = sortedScores.slice(0,10).map(x=>Number(x[0]));
-
-  const neighbors = [];
-  topNumbers.forEach(n=>{
-    const idx = wheel.indexOf(n);
-    neighbors.push(wheel[(idx-1+37)%37]);
-    neighbors.push(wheel[(idx+1)%37]);
-  });
-
-  document.getElementById("topNumbers").innerHTML="<b>Top 10 Numbers:</b> "+topNumbers.join(", ");
-  document.getElementById("neighbors").innerHTML="<b>Neighbors:</b> "+neighbors.join(", ");
-
-  let barsHTML="<b>Probabilities:</b><br>";
-  sortedScores.slice(0,10).forEach(([n,p])=>{
-    const color = p>10?'#b00':p>5?'#f90':'#444';
-    barsHTML += `<div style="display:flex;align-items:center;margin:2px 0;"><span style="width:30px">${n}</span><div style="height:18px;background:${color};width:${p*2}%"></div><span style="margin-left:4px">${p}%</span></div>`;
-  });
-  document.getElementById("probability").innerHTML=barsHTML;
+  drawMiniWheel();
+  drawProbabilities();
 }
 
-function drawMiniWheel(top10){
-  const canvas=document.getElementById("miniWheel");
-  const ctx=canvas.getContext("2d");
-  const radius=canvas.width/2-20;
-  const cx=canvas.width/2, cy=canvas.height/2;
+// === Step 4: Mini-Wheel Drawing ===
+function drawMiniWheel(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const angleStep = 2*Math.PI/37;
+  const angleStep=2*Math.PI/37;
   for(let i=0;i<37;i++){
-    const ang = i*angleStep - Math.PI/2;
-    const x = cx + radius*Math.cos(ang);
-    const y = cy + radius*Math.sin(ang);
+    const ang=i*angleStep-Math.PI/2;
+    const x=cx+radius*Math.cos(ang);
+    const y=cy+radius*Math.sin(ang);
     ctx.beginPath();
     ctx.arc(x,y,12,0,2*Math.PI);
-    const n = wheel[i];
-    if(top10.map(t=>t[0]).includes(n)) ctx.fillStyle='#b00';
-    else ctx.fillStyle='#444';
+    const n=wheel[i];
+    if(top3.includes(n)){ ctx.fillStyle="#b00"; ctx.shadowColor="#f00"; ctx.shadowBlur=12;}
+    else if(neighbors.includes(n)){ ctx.fillStyle="#f90"; ctx.shadowColor="#ff0"; ctx.shadowBlur=6;}
+    else { ctx.fillStyle="#444"; ctx.shadowBlur=0;}
     ctx.fill();
-    ctx.fillStyle='#fff';
-    ctx.font='12px Arial';
-    ctx.textAlign='center';
-    ctx.textBaseline='middle';
-    ctx.fillText(n,x,y);
+    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(n,x,y);
   }
 }
+
+// === Step 5: Probabilities Bar ===
+function drawProbabilities(){
+  const total=history.length;
+  let html="<b>Probabilities:</b><br>";
+  const counts=Array(37).fill(0);
+  history.forEach(n=>counts[n]+=1);
+  for(let i=0;i<37;i++){
+    const p=((counts[wheel[i]]/total)*100).toFixed(1);
+    const color=p>10?'#b00':p>5?'#f90':'#444';
+    html+=`<div style="display:flex;align-items:center;margin:2px 0;"><span style="width:25px">${wheel[i]}</span>
+      <div style="height:16px;width:${p*2}%;background:${color};border-radius:4px;"></div>
+      <span style="margin-left:4px">${p}%</span></div>`;
+  }
+  document.getElementById("probabilities").innerHTML=html;
+}
 </script>
+
 </body>
 </html>
