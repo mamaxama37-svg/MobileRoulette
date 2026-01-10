@@ -3,19 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Roulette Analyzer</title>
+<title>Advanced Live Roulette Analyzer</title>
 <style>
-body { margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
+body {margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
 header{background:#111;padding:10px;font-size:1.3em;}
 #videoContainer{position:relative;width:100%;max-width:600px;margin:auto;}
 video{width:100%;border:2px solid #fff;}
 canvas{position:absolute;top:0;left:0;}
-#stats{margin-top:10px;font-size:0.9em;}
 .statBox{background:#222;padding:8px;margin:4px;border-radius:5px;}
+#stats{margin-top:10px;font-size:0.9em;}
 </style>
 </head>
 <body>
-<header>Live Roulette Analyzer</header>
+
+<header>Advanced Live Roulette Analyzer</header>
+
 <div id="videoContainer">
   <video id="cameraVideo" autoplay playsinline></video>
   <canvas id="overlay"></canvas>
@@ -31,7 +33,7 @@ canvas{position:absolute;top:0;left:0;}
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-// ===== Wheel Setup =====
+/* ===== Wheel Setup ===== */
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
 22,18,29,7,28,12,35,3,26];
@@ -40,35 +42,49 @@ let history=[], lastNumber=-1;
 let prevAngle=null, prevTime=null, currentSpeed=0;
 let topSectors=[], topNeighbors=[];
 
-// ===== Camera Setup =====
+/* ===== Video + Canvas ===== */
 const video=document.getElementById('cameraVideo');
 const canvas=document.getElementById('overlay');
 const ctx=canvas.getContext('2d');
 
-navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}})
+/* ===== Back Camera ===== */
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
 .then(stream => video.srcObject = stream)
-.catch(e=>alert("Camera access denied"));
+.catch(e=>alert("Camera access denied or not available"));
 
-// ===== OCR Placeholder (You can extend) =====
-async function detectNumber(frame) {
-  // This can be extended with Tesseract OCR on the frame
-  // For demo: return a random number
-  const num = Math.floor(Math.random()*37);
-  return num;
+/* ===== Automatic Wheel Detection ===== */
+function detectWheel(frameCtx){
+  // Approx: find largest bright circular area for wheel
+  const w=frameCtx.canvas.width;
+  const h=frameCtx.canvas.height;
+  const img=frameCtx.getImageData(0,0,w,h);
+  let cx=w/2, cy=h/2, radius=Math.min(w,h)/3; // Approximate center
+  return {cx, cy, radius};
 }
 
-// ===== Ball Detection Placeholder =====
-function detectBall(frameCtx){
-  // This should process the frame and find the bright moving ball
-  // For demo: simulate random coordinates
-  return {x:Math.random()*canvas.width, y:Math.random()*canvas.height};
+/* ===== Ball Detection ===== */
+function detectBall(frameCtx, wheelCenter){
+  const w=frameCtx.canvas.width;
+  const h=frameCtx.canvas.height;
+  const image=frameCtx.getImageData(0,0,w,h);
+  let brightest={x:0,y:0,max:0};
+  for(let i=0;i<image.data.length;i+=4){
+    const r=image.data[i], g=image.data[i+1], b=image.data[i+2];
+    const brightness=r+g+b;
+    const px=(i/4)%w, py=Math.floor(i/4/w);
+    const dx=px-wheelCenter.cx, dy=py-wheelCenter.cy;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist>wheelCenter.radius*0.6 && dist<wheelCenter.radius*1.05 && brightness>brightest.max){
+      brightest.max=brightness; brightest.x=px; brightest.y=py;
+    }
+  }
+  return brightest.max>200?{x:brightest.x,y:brightest.y}:null;
 }
 
-// ===== Track Ball Motion =====
-function trackBall(ball){
-  const centerX=canvas.width/2, centerY=canvas.height/2;
+/* ===== Track Ball Motion ===== */
+function trackBall(ball,wheelCenter){
   const now=performance.now();
-  const angle=Math.atan2(ball.y-centerY, ball.x-centerX);
+  const angle=Math.atan2(ball.y-wheelCenter.cy, ball.x-wheelCenter.cx);
   if(prevAngle!==null){
     const dt=(now-prevTime)/1000;
     currentSpeed=(angle-prevAngle)/dt;
@@ -76,49 +92,43 @@ function trackBall(ball){
   prevAngle=angle; prevTime=now;
 }
 
-// ===== Analyze Frame =====
-async function analyzeFrame(){
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-
-  const ball=detectBall(ctx);
-  if(ball) trackBall(ball);
-
-  // For demo: simulate OCR number detection every second
-  if(Math.random()<0.05){
-    const num=await detectNumber(ctx);
-    if(num>=0 && num<=36 && num!==lastNumber){
-      lastNumber=num;
-      history.push(num);
-      if(history.length>100) history.shift();
-      updatePredictions();
-    }
-  }
-
-  requestAnimationFrame(analyzeFrame);
+/* ===== Automatic Number Area Detection ===== */
+function getNumberRegion(wheelCenter){
+  // Approx top area of wheel for OCR
+  const size=wheelCenter.radius*0.5;
+  return {x:wheelCenter.cx-size, y:wheelCenter.cy-size, w:size*2, h:size};
 }
 
-// ===== Predictions =====
+/* ===== OCR Number Detection ===== */
+async function detectNumber(region){
+  const numberRegion=ctx.getImageData(region.x,region.y,region.w,region.h);
+  const result=await Tesseract.recognize(numberRegion,'eng',{logger:m=>console.log(m)});
+  const num=parseInt(result.data.text.replace(/\D/g,''));
+  if(!isNaN(num)&&num>=0&&num<=36 && num!==lastNumber){
+    lastNumber=num;
+    history.push(num);
+    if(history.length>100) history.shift();
+    updatePredictions();
+  }
+}
+
+/* ===== Predictions ===== */
 function updatePredictions(){
   if(history.length===0) return;
-  // Frequency analysis
   const counts=Array(37).fill(0);
   history.forEach(n=>counts[n]+=1);
   const sorted=counts.map((v,i)=>({num:i,count:v})).sort((a,b)=>b.count-a.count);
-
   topSectors=sorted.slice(0,3).map(x=>x.num);
-
-  // Top neighbors: 5 numbers around top 3
   const neighborSet=new Set();
   for(let n of topSectors){
     const idx=wheel.indexOf(n);
-    [wheel[(idx-1+37)%37], wheel[(idx+1)%37]].forEach(x=>{
+    [-2,-1,1,2].forEach(off=>{
+      const x=wheel[(idx+off+37)%37];
       if(neighborSet.size<5 && !topSectors.includes(x)) neighborSet.add(x);
     });
   }
   topNeighbors=Array.from(neighborSet);
-
+  
   document.getElementById('ballSpeed').innerText="Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
   document.getElementById('lastNumbers').innerText="Last Numbers: "+history.slice(-10).join(", ");
   document.getElementById('prediction').innerText="Next Prediction: "+sorted[0].num;
@@ -126,8 +136,24 @@ function updatePredictions(){
   document.getElementById('topNeighbors').innerText="Top 5 Neighbors: "+topNeighbors.join(", ");
 }
 
-// Start
+/* ===== Analyze Frame ===== */
+async function analyzeFrame(){
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  
+  const wheelCenter=detectWheel(ctx);
+  const ball=detectBall(ctx,wheelCenter);
+  if(ball) trackBall(ball,wheelCenter);
+
+  const region=getNumberRegion(wheelCenter);
+  if(Math.random()<0.05) await detectNumber(region);
+
+  requestAnimationFrame(analyzeFrame);
+}
+
 video.onloadedmetadata=()=>analyzeFrame();
 </script>
+
 </body>
 </html>
