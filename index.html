@@ -3,113 +3,117 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Mobile Roulette Analyzer</title>
+<title>Smart Roulette Analyzer v3</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial; text-align:center; margin:0; padding:0; }
+body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
-#controls { margin:10px; }
+#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
+textarea { width:90%; height:100px; margin:4px 0; }
 canvas { display:block; margin:auto; border:2px solid #555; border-radius:50%; background:#111; }
-.tooltip { position:absolute; background:#222; color:#fff; padding:6px 8px; border-radius:6px; font-size:0.9em; display:none; pointer-events:none; }
-.info { margin-top:6px; font-size:0.9em; width:90%; margin:auto; text-align:left; }
+.info { margin-top:6px; font-size:0.9em; text-align:left; width:90%; margin:auto; }
+.hot { color:#b00; font-weight:bold; }
+.warm { color:#f90; }
+.cold { color:#666; }
+.bar { height:16px; border-radius:4px; margin:2px 0; display:flex; align-items:center; }
+.bar-num { width:25px; text-align:center; margin-right:4px; }
 </style>
 </head>
 <body>
 
-<header>Live Mobile Roulette Analyzer</header>
+<header>Smart Roulette Analyzer v3</header>
 
-<div id="controls">
-<button onclick="captureScreen()">Capture Screen & Analyze</button>
+<div id="box">
+<b>1️⃣ Paste Last 100 Numbers (1-36)</b><br>
+<textarea id="numInput" placeholder="Example: 10,23,5,8,11,..."></textarea><br>
+<button onclick="analyzeNumbers()">Analyze Numbers</button>
+</div>
+
+<div id="box">
+<div class="info" id="status">Waiting for numbers…</div>
+<div class="info" id="prediction"></div>
+<div class="info" id="betSector"></div>
+<div class="info" id="neighborPred"></div>
+<div class="info" id="probabilities"></div>
 </div>
 
 <canvas id="miniWheel" width="320" height="320"></canvas>
-<div class="tooltip" id="tooltip"></div>
-<div class="info" id="status">Waiting for screen capture…</div>
-<div class="info" id="prediction"></div>
-<div class="info" id="probabilities"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
+// ===== Wheel Layout =====
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
 22,18,29,7,28,12,35,3,26];
 
-let history=[], top3=[], neighbors=[];
+let history=[], topNumber=null, top3=[], neighbors=[], topNeighbor=null;
 const canvas=document.getElementById("miniWheel");
 const ctx=canvas.getContext("2d");
-const tooltip=document.getElementById("tooltip");
 const cx=canvas.width/2, cy=canvas.height/2, radius=canvas.width/2-20;
 
-// === Step 1: Screen Capture ===
-async function captureScreen(){
-  if(!navigator.mediaDevices.getDisplayMedia){
-    alert("Screen capture not supported on this browser.");
-    return;
-  }
-  try{
-    const stream=await navigator.mediaDevices.getDisplayMedia({video:true});
-    const track=stream.getVideoTracks()[0];
-    const imageCapture=new ImageCapture(track);
-    const bitmap=await imageCapture.grabFrame();
-    track.stop();
-
-    // Draw frame to canvas for debugging
-    const tempCanvas=document.createElement("canvas");
-    tempCanvas.width=bitmap.width;
-    tempCanvas.height=bitmap.height;
-    const tempCtx=tempCanvas.getContext("2d");
-    tempCtx.drawImage(bitmap,0,0);
-    analyzeScreenshot(tempCanvas);
-
-  } catch(err){
-    alert("Screen capture failed: "+err);
-  }
-}
-
-// === Step 2: OCR Detection ===
-async function analyzeScreenshot(canvasImg){
-  document.getElementById("status").innerText="Analyzing screenshot...";
-  const result=await Tesseract.recognize(canvasImg,'eng');
-  let nums=result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-  if(!nums || nums.length<50){
-    alert("OCR could not detect enough numbers.");
-    return;
-  }
+// ===== Analyze Numbers =====
+function analyzeNumbers(){
+  const text=document.getElementById("numInput").value;
+  let nums=text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums || nums.length<50) return alert("Enter at least 50 numbers");
   history=nums.map(Number).slice(-100);
-  document.getElementById("status").innerText="Numbers detected: "+history.join(",");
+  document.getElementById("status").innerText="Numbers analyzed: "+history.join(",");
   calculatePredictions();
 }
 
-// === Step 3: Prediction ===
+// ===== Prediction =====
 function calculatePredictions(){
   const heat=Array(37).fill(0);
+
+  // Weighted calculation: neighbors get 50% extra
   history.forEach(n=>{
     const idx=wheel.indexOf(n);
-    for(let i=-2;i<=2;i++) heat[(idx+i+37)%37]++;
+    for(let i=-1;i<=1;i++){
+      heat[(idx+i+37)%37]+=1; // main
+      if(i!==0) heat[(idx+i+37)%37]+=0.5; // neighbor extra
+    }
   });
 
-  const sorted=heat.map((v,i)=>({num:wheel[i],heat:v})).sort((a,b)=>b.heat-a.heat);
+  // Sort numbers by weighted heat
+  const sorted=heat.map((v,i)=>({num:wheel[i],weight:v})).sort((a,b)=>b.weight-a.weight);
+  topNumber=sorted[0].num;
   top3=sorted.slice(0,3).map(x=>x.num);
 
-  // Neighbors max 5
+  // Top 5 neighbors around top 3
   const neighborSet=new Set();
   for(let n of top3){
     const idx=wheel.indexOf(n);
     [wheel[(idx-1+37)%37], wheel[(idx+1)%37]].forEach(x=>{
-      if(neighborSet.size<5) neighborSet.add(x);
+      if(neighborSet.size<5 && !top3.includes(x)) neighborSet.add(x);
     });
   }
   neighbors=Array.from(neighborSet);
 
+  // Predict most likely next neighbor
+  const neighborCounts=Array(37).fill(0);
+  history.forEach(n=>{
+    if(neighbors.includes(n)) neighborCounts[n]+=1;
+  });
+  const maxCount=Math.max(...neighborCounts);
+  topNeighbor=neighborCounts.indexOf(maxCount);
+
+  // Output
   document.getElementById("prediction").innerHTML=
-    "<b>Top 3 Next Numbers:</b> "+top3.join(", ")+"<br>"+
-    "<b>Neighbors (max 5):</b> "+neighbors.join(", ");
+    "<b>Predicted Next Number:</b> <span class='hot'>"+topNumber+"</span><br>"+
+    "<b>Top 3 Numbers:</b> "+top3.join(", ")+"<br>"+
+    "<b>5 Neighbors:</b> "+neighbors.join(", ");
+
+  const sector=[topNumber,...neighbors].slice(0,5);
+  document.getElementById("betSector").innerHTML=
+    "<b>Suggested Bet Sector:</b> "+sector.join(", ");
+
+  document.getElementById("neighborPred").innerHTML=
+    "<b>Most Likely Neighbor Next Spin:</b> "+topNeighbor;
 
   drawMiniWheel();
   drawProbabilities();
 }
 
-// === Step 4: Mini-Wheel Drawing ===
+// ===== Mini-Wheel =====
 function drawMiniWheel(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const angleStep=2*Math.PI/37;
@@ -118,17 +122,19 @@ function drawMiniWheel(){
     const x=cx+radius*Math.cos(ang);
     const y=cy+radius*Math.sin(ang);
     ctx.beginPath();
-    ctx.arc(x,y,12,0,2*Math.PI);
+    ctx.arc(x,y,14,0,2*Math.PI);
     const n=wheel[i];
-    if(top3.includes(n)){ ctx.fillStyle="#b00"; ctx.shadowColor="#f00"; ctx.shadowBlur=12;}
-    else if(neighbors.includes(n)){ ctx.fillStyle="#f90"; ctx.shadowColor="#ff0"; ctx.shadowBlur=6;}
+    if(n===topNumber){ ctx.fillStyle="#b00"; ctx.shadowColor="#f00"; ctx.shadowBlur=14;}
+    else if(top3.includes(n)){ ctx.fillStyle="#f60"; ctx.shadowColor="#f90"; ctx.shadowBlur=6;}
+    else if(neighbors.includes(n)){ ctx.fillStyle="#ff0"; ctx.shadowColor="#ff0"; ctx.shadowBlur=4;}
     else { ctx.fillStyle="#444"; ctx.shadowBlur=0;}
     ctx.fill();
-    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(n,x,y);
+    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(n,x,y);
   }
 }
 
-// === Step 5: Probabilities Bar ===
+// ===== Probabilities =====
 function drawProbabilities(){
   const total=history.length;
   let html="<b>Probabilities:</b><br>";
@@ -137,13 +143,14 @@ function drawProbabilities(){
   for(let i=0;i<37;i++){
     const p=((counts[wheel[i]]/total)*100).toFixed(1);
     const color=p>10?'#b00':p>5?'#f90':'#444';
-    html+=`<div style="display:flex;align-items:center;margin:2px 0;"><span style="width:25px">${wheel[i]}</span>
+    html+=`<div class="bar">
+      <span class="bar-num">${wheel[i]}</span>
       <div style="height:16px;width:${p*2}%;background:${color};border-radius:4px;"></div>
-      <span style="margin-left:4px">${p}%</span></div>`;
+      <span style="margin-left:4px">${p}%</span>
+    </div>`;
   }
   document.getElementById("probabilities").innerHTML=html;
 }
 </script>
-
 </body>
 </html>
