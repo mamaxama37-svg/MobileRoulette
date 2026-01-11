@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Advanced Live Roulette Analyzer</title>
+<title>Optimized Mobile Live Roulette Analyzer</title>
 <style>
 body {margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
 header{background:#111;padding:10px;font-size:1.3em;}
@@ -16,7 +16,7 @@ canvas{position:absolute;top:0;left:0;}
 </head>
 <body>
 
-<header>Advanced Live Roulette Analyzer</header>
+<header>Optimized Mobile Live Roulette Analyzer</header>
 
 <div id="videoContainer">
   <video id="cameraVideo" autoplay playsinline></video>
@@ -47,18 +47,17 @@ const video=document.getElementById('cameraVideo');
 const canvas=document.getElementById('overlay');
 const ctx=canvas.getContext('2d');
 
-/* ===== Back Camera ===== */
-navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
-.then(stream => video.srcObject = stream)
+/* ===== Back Camera with Reduced Resolution ===== */
+navigator.mediaDevices.getUserMedia({
+  video:{facingMode:"environment", width:640, height:480}
+}).then(stream => video.srcObject = stream)
 .catch(e=>alert("Camera access denied or not available"));
 
 /* ===== Automatic Wheel Detection ===== */
 function detectWheel(frameCtx){
-  // Approx: find largest bright circular area for wheel
   const w=frameCtx.canvas.width;
   const h=frameCtx.canvas.height;
-  const img=frameCtx.getImageData(0,0,w,h);
-  let cx=w/2, cy=h/2, radius=Math.min(w,h)/3; // Approximate center
+  const cx=w/2, cy=h/2, radius=Math.min(w,h)/3;
   return {cx, cy, radius};
 }
 
@@ -66,10 +65,10 @@ function detectWheel(frameCtx){
 function detectBall(frameCtx, wheelCenter){
   const w=frameCtx.canvas.width;
   const h=frameCtx.canvas.height;
-  const image=frameCtx.getImageData(0,0,w,h);
+  const img=frameCtx.getImageData(0,0,w,h);
   let brightest={x:0,y:0,max:0};
-  for(let i=0;i<image.data.length;i+=4){
-    const r=image.data[i], g=image.data[i+1], b=image.data[i+2];
+  for(let i=0;i<img.data.length;i+=16){ // sample every 4 pixels
+    const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
     const brightness=r+g+b;
     const px=(i/4)%w, py=Math.floor(i/4/w);
     const dx=px-wheelCenter.cx, dy=py-wheelCenter.cy;
@@ -94,22 +93,29 @@ function trackBall(ball,wheelCenter){
 
 /* ===== Automatic Number Area Detection ===== */
 function getNumberRegion(wheelCenter){
-  // Approx top area of wheel for OCR
   const size=wheelCenter.radius*0.5;
   return {x:wheelCenter.cx-size, y:wheelCenter.cy-size, w:size*2, h:size};
 }
 
 /* ===== OCR Number Detection ===== */
+let lastOCR=0;
+const OCR_INTERVAL=1000;
+
 async function detectNumber(region){
+  const now=performance.now();
+  if(now-lastOCR<OCR_INTERVAL) return; // limit OCR
+  lastOCR=now;
   const numberRegion=ctx.getImageData(region.x,region.y,region.w,region.h);
-  const result=await Tesseract.recognize(numberRegion,'eng',{logger:m=>console.log(m)});
-  const num=parseInt(result.data.text.replace(/\D/g,''));
-  if(!isNaN(num)&&num>=0&&num<=36 && num!==lastNumber){
-    lastNumber=num;
-    history.push(num);
-    if(history.length>100) history.shift();
-    updatePredictions();
-  }
+  try{
+    const result=await Tesseract.recognize(numberRegion,'eng');
+    const num=parseInt(result.data.text.replace(/\D/g,''));
+    if(!isNaN(num)&&num>=0&&num<=36 && num!==lastNumber){
+      lastNumber=num;
+      history.push(num);
+      if(history.length>100) history.shift();
+      updatePredictions();
+    }
+  }catch(e){console.log("OCR failed",e);}
 }
 
 /* ===== Predictions ===== */
@@ -147,7 +153,7 @@ async function analyzeFrame(){
   if(ball) trackBall(ball,wheelCenter);
 
   const region=getNumberRegion(wheelCenter);
-  if(Math.random()<0.05) await detectNumber(region);
+  await detectNumber(region);
 
   requestAnimationFrame(analyzeFrame);
 }
