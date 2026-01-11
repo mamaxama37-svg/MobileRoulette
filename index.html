@@ -3,55 +3,44 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Live Roulette Analyzer</title>
+<title>Live Roulette Analyzer - Capture 100 Numbers</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
 #videoContainer { position:relative; width:100%; max-width:600px; margin:auto; }
 video, canvas { width:100%; border:2px solid #fff; }
-#controls { margin:10px; }
-#status, #numbers, #prediction, #sectors { margin:6px; padding:6px; background:#222; border-radius:6px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
+#status, #numbers, #prediction, #sectors { margin:6px; padding:6px; background:#222; border-radius:6px; }
 </style>
 </head>
 <body>
 
-<header>Pro Live Mobile Roulette Analyzer</header>
+<header>Live Roulette Analyzer</header>
 
 <div id="videoContainer">
-  <video id="rouletteVideo" autoplay muted></video>
-  <canvas id="canvas"></canvas>
+  <video id="rouletteVideo" autoplay muted playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
 </div>
 
-<div id="controls">
-  <button id="startBtn">Start Detection</button>
-  <button id="stopBtn">Stop Detection</button>
-</div>
+<button id="captureBtn">Capture Last 100 Numbers</button>
 
 <div id="status">Status: Waiting…</div>
 <div id="numbers">Last 100 Numbers: --</div>
-<div id="prediction">Next Prediction: --</div>
 <div id="sectors">Top 3 Sectors: --</div>
+<div id="prediction">Next Prediction + 1 Neighbor: --</div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-               30,8,23,10,5,24,16,33,1,20,14,31,9,
-               22,18,29,7,28,12,35,3,26];
-
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 let lastNumbers = [];
-let detectionActive = false;
-let prevAngle = null;
-let prevTime = null;
-let ballSpeed = 0;
 
 const video = document.getElementById('rouletteVideo');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const numbersEl = document.getElementById('numbers');
-const predictionEl = document.getElementById('prediction');
 const sectorsEl = document.getElementById('sectors');
+const predictionEl = document.getElementById('prediction');
 
 // Start back camera
 async function startCamera() {
@@ -61,85 +50,85 @@ async function startCamera() {
       audio: false
     });
     video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    };
-    statusEl.innerText = "Camera started.";
+    statusEl.innerText = "Camera started. Position the roulette numbers in view.";
   } catch(err) {
     statusEl.innerText = "Camera error: " + err;
   }
 }
 
-// OCR & Ball Detection per frame
-async function detectFrame() {
-  if(!detectionActive) return;
+// Capture 100 numbers from camera
+async function captureNumbers() {
+  if(!video.srcObject) return alert("Camera not started");
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  statusEl.innerText = "Processing OCR…";
 
-  // --- Ball Detection ---
-  const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
-  const ball = detectBall(imageData);
-  if(ball) trackBall(ball);
+  // This is where you define each square crop area manually or detect dynamically
+  // For demo, we assume 100 number squares, evenly spaced horizontally
+  const detectedNumbers = [];
+  const squareWidth = canvas.width / 10; // example: 10 per row
+  const squareHeight = canvas.height / 10; // 10 rows
 
-  // --- OCR Detection (simulate for now, replace with Tesseract for each number square) ---
-  let simulatedNumber = Math.floor(Math.random()*37); 
-  if(lastNumbers.length===0 || lastNumbers[lastNumbers.length-1]!==simulatedNumber){
-    lastNumbers.push(simulatedNumber);
-    if(lastNumbers.length>100) lastNumbers.shift();
+  for(let row=0; row<10; row++){
+    for(let col=0; col<10; col++){
+      const x = col * squareWidth;
+      const y = row * squareHeight;
+      const imageData = ctx.getImageData(x, y, squareWidth, squareHeight);
+      try {
+        const result = await Tesseract.recognize(imageData, 'eng', { tessedit_char_whitelist: '0123456789' });
+        const num = parseInt(result.data.text.replace(/\D/g,''));
+        if(!isNaN(num) && num >=0 && num <=36) detectedNumbers.push(num);
+      } catch(e) {
+        console.log("OCR error at square:", row,col,e);
+      }
+    }
   }
 
+  if(detectedNumbers.length < 10) {
+    statusEl.innerText = "OCR failed: Not enough numbers detected. Make sure numbers are clear.";
+    return;
+  }
+
+  lastNumbers = detectedNumbers.slice(-100); // last 100 numbers
   numbersEl.innerText = "Last 100 Numbers: " + lastNumbers.join(", ");
 
-  // --- Prediction ---
+  calculatePrediction();
+}
+
+// Calculate Top 3 Sectors + Neighbor
+function calculatePrediction() {
+  if(lastNumbers.length===0) return;
+
+  // Frequency table
   const freq = {};
   lastNumbers.forEach(n=>freq[n]=(freq[n]||0)+1);
+
+  // Top numbers
   const sorted = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
-  const topNum = parseInt(sorted[0][0]);
-  const neighbor = wheel[(wheel.indexOf(topNum)+1)%37];
-  predictionEl.innerText = `Next Prediction: ${topNum} | Neighbor: ${neighbor}`;
+  const topNumbers = sorted.slice(0,10).map(e=>parseInt(e[0]));
 
-  // Top 3 sectors calculation
-  const heat = Array(37).fill(0);
-  lastNumbers.forEach(n=>{
-    const idx = wheel.indexOf(n);
-    for(let i=-1;i<=1;i++) heat[(idx+i+37)%37]++;
-  });
-  const topSectors = [];
-  heat.forEach((v,i)=>topSectors.push({n:wheel[i],v}));
-  topSectors.sort((a,b)=>b.v-a.v);
-  sectorsEl.innerText = "Top 3 Sectors: "+topSectors.slice(0,3).map(x=>x.n).join(", ");
-
-  requestAnimationFrame(detectFrame);
-}
-
-// Simple white ball detection (placeholder)
-function detectBall(imageData){
-  // Implement color thresholding to find the white ball
-  return {x:canvas.width/2, y:canvas.height/2}; 
-}
-
-// Track angular speed
-function trackBall(ball){
-  const centerX=canvas.width/2, centerY=canvas.height/2;
-  const now = performance.now();
-  const angle = Math.atan2(ball.y-centerY, ball.x-centerX);
-  if(prevAngle!==null){
-    const dt = (now-prevTime)/1000;
-    ballSpeed = (angle-prevAngle)/dt;
+  // Macro sectors (sum of 5 neighbors)
+  const sectorScores = [];
+  for(let i=0;i<wheel.length;i++){
+    let score=0;
+    for(let j=-2;j<=2;j++){
+      const idx=(i+j+wheel.length)%wheel.length;
+      score += freq[wheel[idx]]||0;
+    }
+    sectorScores.push({number:wheel[i],score});
   }
-  prevAngle = angle;
-  prevTime = now;
+  sectorScores.sort((a,b)=>b.score-a.score);
+  const topSectors = sectorScores.slice(0,3).map(s=>s.number);
+  sectorsEl.innerText = "Top 3 Sectors: " + topSectors.join(", ");
+
+  // Prediction = most frequent number + next neighbor
+  const nextNumber = topNumbers[0];
+  const neighbor = wheel[(wheel.indexOf(nextNumber)+1)%wheel.length];
+  predictionEl.innerText = `Next Prediction + 1 Neighbor: ${nextNumber} | ${neighbor}`;
+
+  statusEl.innerText = "OCR complete. Prediction ready.";
 }
 
-document.getElementById('startBtn').addEventListener('click', ()=>{
-  detectionActive = true;
-  detectFrame();
-});
-
-document.getElementById('stopBtn').addEventListener('click', ()=>{
-  detectionActive = false;
-  statusEl.innerText = "Detection stopped.";
-});
+document.getElementById('captureBtn').addEventListener('click', captureNumbers);
 
 startCamera();
 </script>
