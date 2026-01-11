@@ -20,19 +20,19 @@ button { padding:8px 12px; margin:6px; font-size:1em; }
 <header>Live Roulette Analyzer</header>
 
 <div id="videoContainer">
-<video id="cameraFeed" autoplay playsinline></video>
-<canvas id="processingCanvas"></canvas>
+  <video id="cameraFeed" autoplay playsinline></video>
+  <canvas id="processingCanvas"></canvas>
 </div>
 
 <div id="controls">
-<button onclick="startDetection()">Start Detection</button>
+  <button id="startBtn">Start Detection</button>
 </div>
 
 <div id="stats">
-<div class="statBox" id="lastNumbers">Last 100 Numbers: --</div>
-<div class="statBox" id="macroSector">Macro Sector: --</div>
-<div class="statBox" id="prediction">Next Number: -- | Neighbor: --</div>
-<div class="statBox" id="probabilities">Probabilities: --</div>
+  <div class="statBox" id="lastNumbers">Last 100 Numbers: --</div>
+  <div class="statBox" id="macroSector">Macro Sector: --</div>
+  <div class="statBox" id="prediction">Next Number: -- | Neighbor: --</div>
+  <div class="statBox" id="probabilities">Probabilities: --</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
@@ -47,36 +47,42 @@ const canvas = document.getElementById('processingCanvas');
 const ctx = canvas.getContext('2d');
 let prevAngle = null, prevTime = null;
 
-async function startDetection(){
-  // Start back camera
-  const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"environment" }, audio:false });
-  video.srcObject = stream;
-  video.onloadedmetadata = () => {
+// ------------------- Start Detection -------------------
+document.getElementById('startBtn').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact: "environment" } }, 
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     detectLoop();
-  };
-}
+  } catch(err) {
+    console.error("Camera start failed:", err);
+    alert("Camera access failed: " + err.message);
+  }
+});
 
+// ------------------- Main Detection Loop -------------------
 function detectLoop(){
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  // OCR placeholder: detect numbers from frame
   detectNumbersFromFrame(ctx).then(updateUI);
-  // Ball tracking placeholder: detect ball
   const ball = detectBall(ctx);
   if(ball) trackBallMotion(ball);
   requestAnimationFrame(detectLoop);
 }
 
-// ----- MOCK OCR (replace with real cell detection for live roulette) -----
+// ------------------- MOCK OCR -------------------
 async function detectNumbersFromFrame(ctx){
-  // For demo, we just return lastNumbers array unchanged
+  // Placeholder: replace with real detection logic
   return lastNumbers;
 }
 
-// ----- Ball motion tracking -----
+// ------------------- Ball Detection -------------------
 function detectBall(ctx){
-  // Placeholder: in real implementation detect bright ball
+  // Placeholder: detect bright ball here
   return {x:canvas.width/2, y:canvas.height/2};
 }
 
@@ -92,10 +98,9 @@ function trackBallMotion(ball){
   prevTime = now;
 }
 
-// ----- Prediction engine -----
+// ------------------- Prediction Engine -------------------
 function predictNextNumber(){
   if(lastNumbers.length<5) return {number:'--', neighbor:'--', prob:'--'};
-  // Simple weighted prediction
   const count = {};
   lastNumbers.forEach(n => count[n] = (count[n]||0)+1);
   const sorted = Object.entries(count).sort((a,b)=>b[1]-a[1]);
@@ -106,11 +111,10 @@ function predictNextNumber(){
   return {number, neighbor, prob};
 }
 
-// ----- UI Update -----
+// ------------------- UI Update -------------------
 function updateUI(nums){
   lastNumbers = nums.slice(-100);
   document.getElementById('lastNumbers').innerText = "Last 100 Numbers: "+lastNumbers.join(',');
-  // Macro sector: top 3
   const counts = {};
   lastNumbers.forEach(n=>counts[n]=(counts[n]||0)+1);
   macroSector = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
