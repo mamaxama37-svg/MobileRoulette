@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Screen Capture Roulette Analyzer</title>
+<title>Mobile Roulette Analyzer (Back Camera)</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; text-align:center; margin:0; }
 header { background:#111; padding:12px; font-size:1.2em; }
-#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
 video { width:95%; border:2px solid #fff; margin:5px 0; }
+#results { margin-top:10px; }
 .result { font-size:1.1em; margin-top:6px; }
 .hot { color:#ff5555; font-weight:bold; }
 .good { color:#ffaa00; }
@@ -17,14 +17,11 @@ video { width:95%; border:2px solid #fff; margin:5px 0; }
 </head>
 <body>
 
-<header>Live Screen Capture Roulette Analyzer</header>
+<header>Mobile Roulette Analyzer</header>
 
-<div id="box">
-  <button onclick="startScreenCapture()">Start Screen Capture</button>
-  <video id="rouletteVideo" autoplay muted></video>
-</div>
+<video id="rouletteVideo" autoplay muted playsinline></video>
 
-<div id="box">
+<div id="results">
   <div class="result" id="mainNumber">Main Number: --</div>
   <div class="result" id="neighbor">Top Neighbor: --</div>
   <div class="result" id="probabilities">Top Numbers: --</div>
@@ -40,22 +37,31 @@ const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 22,18,29,7,28,12,35,3,26];
 
 let history=[];
-let sessionHistory=[];
 let prevAngle=null, prevTime=null, currentSpeed=0;
 
-async function startScreenCapture(){
+// Start back camera
+async function startCamera(){
   try{
-    const stream = await navigator.mediaDevices.getDisplayMedia({video:{cursor:"never"}, audio:false});
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact:"environment" }, width:640, height:480 },
+      audio: false
+    });
     const video=document.getElementById("rouletteVideo");
     video.srcObject=stream;
     await video.play();
     requestAnimationFrame(analyzeFrame);
   }catch(e){
-    alert("Screen capture failed: "+e);
+    alert("Camera access failed: "+e+"\nTrying default camera...");
+    // fallback to default camera
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+    const video=document.getElementById("rouletteVideo");
+    video.srcObject=stream;
+    await video.play();
+    requestAnimationFrame(analyzeFrame);
   }
 }
 
-// Main analysis frame
+// Analyze frame for OCR and ball tracking
 async function analyzeFrame(){
   const video=document.getElementById("rouletteVideo");
   const canvas=document.getElementById("canvas");
@@ -64,25 +70,25 @@ async function analyzeFrame(){
   canvas.height=video.videoHeight;
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  // OCR: detect numbers
+  // Detect numbers from top region (adjust if needed)
   await detectNumbers(ctx);
 
-  // Ball detection (simple bright pixel tracking)
+  // Detect ball
   const ball=detectBall(ctx);
-  if(ball) trackBallMotion(ball);
+  if(ball) trackBallMotion(ball, ctx);
 
-  // Update predictions
+  // Update prediction
   updatePrediction();
 
   requestAnimationFrame(analyzeFrame);
 }
 
-// Simple bright pixel detection for ball
+// Detect ball as bright spot
 function detectBall(ctx){
   const img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);
   for(let i=0;i<img.data.length;i+=4){
     const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
-    if(r>200 && g>200 && b>200){ // bright pixel threshold
+    if(r>200 && g>200 && b>200){ 
       const x=(i/4)%ctx.canvas.width;
       const y=Math.floor(i/4/ctx.canvas.width);
       return {x,y};
@@ -91,7 +97,7 @@ function detectBall(ctx){
   return null;
 }
 
-function trackBallMotion(ball){
+function trackBallMotion(ball, ctx){
   const centerX=ctx.canvas.width/2;
   const centerY=ctx.canvas.height/2;
   const now=performance.now();
@@ -104,23 +110,21 @@ function trackBallMotion(ball){
   prevTime=now;
 }
 
-// OCR detection of last number
+// OCR detection
 async function detectNumbers(ctx){
-  const numberRegion={x:ctx.canvas.width*0.4, y:ctx.canvas.height*0.05, w:ctx.canvas.width*0.2, h:ctx.canvas.height*0.08};
-  const imgData=ctx.getImageData(numberRegion.x, numberRegion.y, numberRegion.w, numberRegion.h);
+  const numRegion={x:ctx.canvas.width*0.4, y:ctx.canvas.height*0.05, w:ctx.canvas.width*0.2, h:ctx.canvas.height*0.08};
+  const imgData=ctx.getImageData(numRegion.x, numRegion.y, numRegion.w, numRegion.h);
   const result = await Tesseract.recognize(imgData,'eng');
   const num=parseInt(result.data.text.replace(/\D/g,''));
   if(!isNaN(num) && num>=0 && num<=36){
     if(history.length==0 || history[history.length-1]!=num){
       history.push(num);
       if(history.length>100) history=history.slice(-100);
-      sessionHistory=sessionHistory.concat(num);
-      if(sessionHistory.length>200) sessionHistory=sessionHistory.slice(-200);
     }
   }
 }
 
-// Prediction Engine
+// Prediction engine
 function updatePrediction(){
   if(history.length==0) return;
   const score=Array(37).fill(0);
@@ -134,8 +138,7 @@ function updatePrediction(){
     }
   });
 
-  const sorted=score.map((v,i)=>({num:i,score:v}))
-                    .sort((a,b)=>b.score-a.score);
+  const sorted=score.map((v,i)=>({num:i,score:v})).sort((a,b)=>b.score-a.score);
   const main=sorted[0];
   const mainIdx=wheel.indexOf(main.num);
   const neighbors=[wheel[(mainIdx+1)%37], wheel[(mainIdx-1+37)%37]];
@@ -155,6 +158,9 @@ function updatePrediction(){
   document.getElementById("confidence").innerHTML=
     strong ? "✅ Strong Confidence – Play" : "⚠️ Weak Confidence – Reduce/Skip";
 }
+
+// Start camera on page load
+startCamera();
 </script>
 </body>
 </html>
