@@ -3,99 +3,96 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Roulette Neighbor Intelligence</title>
-
+<title>Roulette Precision Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
-header { background:#111; padding:12px; font-size:1.3em; }
+body { background:#000; color:#fff; font-family:Arial; text-align:center; }
+textarea { width:95%; height:120px; background:#111; color:#0f0; }
+button { padding:10px; margin:10px; font-size:1em; }
 .box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-textarea { width:95%; height:90px; background:#000; color:#0f0; }
-button { padding:10px; font-size:1em; margin-top:10px; }
 .good { color:#0f0; }
 .warn { color:#ff0; }
-.bad { color:#f00; }
+.bad { color:#f33; }
 </style>
 </head>
-
 <body>
 
-<header>Advanced Roulette Neighbor Intelligence</header>
+<h2>Roulette Precision Analyzer</h2>
 
 <div class="box">
-<b>Last 100 Numbers (paste here)</b><br>
-<textarea id="history"></textarea>
+<b>Paste last results (space or comma separated)</b><br>
+<textarea id="input"></textarea><br>
+<button onclick="analyze()">Analyze</button>
 </div>
 
-<button id="analyzeBtn">Analyze Next Spin</button>
-
-<div class="box" id="output">Waiting for input…</div>
+<div class="box" id="output"></div>
 
 <script>
-const wheel = [
-0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,
-22,18,29,7,28,12,35,3,26
-];
-
-function parseNumbers(text){
-  return text
-    .split(/[\s,]+/)
-    .map(n => Number(n))
-    .filter(n => n >= 0 && n <= 36);
-}
+const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 
 function analyze(){
-  const historyEl = document.getElementById("history");
-  const outputEl = document.getElementById("output");
-
-  const nums = parseNumbers(historyEl.value).slice(-100);
-
-  if(nums.length < 60){
-    outputEl.innerHTML = "<span class='bad'>Need at least 60 numbers</span>";
+  const raw=document.getElementById("input").value;
+  let nums=raw.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums||nums.length<30){
+    document.getElementById("output").innerText="Need at least 30 numbers.";
     return;
   }
+  nums=nums.map(Number);
+  const N=nums.length;
 
-  const score = Array(37).fill(0);
+  const score=Array(37).fill(0);
 
   nums.forEach((n,i)=>{
-    const weight = Math.pow((i+1)/nums.length, 1.4);
-    const idx = wheel.indexOf(n);
-    for(let d=-2; d<=2; d++){
-      score[(idx+d+37)%37] += weight;
-    }
+    const idx=wheel.indexOf(n);
+    let weight=1;
+    if(i>N-10) weight=1.6;
+    else if(i>N-30) weight=1.2;
+
+    [-2,-1,0,1,2].forEach(d=>{
+      const w=[0.3,0.6,1,0.6,0.3][d+2];
+      score[(idx+d+37)%37]+=w*weight;
+    });
   });
 
-  // Anti-repeat
-  const last = nums[nums.length-1];
-  score[wheel.indexOf(last)] *= 0.2;
+  const ranked=score
+    .map((s,i)=>({n:wheel[i],s}))
+    .sort((a,b)=>b.s-a.s);
 
-  const bestIndex = score.indexOf(Math.max(...score));
-  const target = wheel[bestIndex];
+  const core=ranked[0].n;
+  const idx=wheel.indexOf(core);
+  const sector=[];
+  for(let i=-2;i<=2;i++) sector.push(wheel[(idx+i+37)%37]);
 
-  // ±3 neighbors
-  const zone=[];
-  for(let i=-3;i<=3;i++){
-    zone.push(wheel[(bestIndex+i+37)%37]);
+  // --- FORECAST ANALYSIS ---
+  const recent5 = nums.slice(-5);
+  const recent10 = nums.slice(-10);
+  const recent20 = nums.slice(-20);
+
+  const hitRate = arr => arr.filter(n=>sector.includes(n)).length / arr.length;
+
+  const r5 = hitRate(recent5);
+  const r10 = hitRate(recent10);
+  const r20 = hitRate(recent20);
+
+  let windowText="", windowClass="";
+  if(r5>0.4 && r10>0.3){
+    windowText="Strong for next 2–4 spins";
+    windowClass="good";
+  } else if(r10>0.25){
+    windowText="Medium for spins 3–6";
+    windowClass="warn";
+  } else {
+    windowText="Weak – avoid extended betting";
+    windowClass="bad";
   }
 
-  // Confidence logic
-  const recent = nums.slice(-14);
-  const hits = recent.filter(n => zone.includes(n)).length;
-  let signal = "SKIP";
-  let cls = "bad";
-
-  if(hits >= 4){ signal="PLAY"; cls="good"; }
-  else if(hits >= 2){ signal="WAIT"; cls="warn"; }
-
-  outputEl.innerHTML = `
-    <b>Primary Target:</b> <span class="good">${target}</span><br><br>
-    <b>Bet Zone (±3 neighbors):</b><br>${zone.join(", ")}<br><br>
-    <b>Hits in last 14:</b> ${hits}<br>
-    <b>Signal:</b> <span class="${cls}">${signal}</span>
-  `;
+  document.getElementById("output").innerHTML=
+    `<b>CORE NUMBER:</b> ${core}<br><br>
+     <b>NEIGHBORS (±2):</b><br>${sector.join(", ")}<br><br>
+     <b>TOP 5 RANKED:</b><br>${ranked.slice(0,5).map(r=>r.n).join(", ")}<br><br>
+     <b>FORECAST WINDOW:</b><br>
+     <span class="${windowClass}">${windowText}</span><br><br>
+     <b>RULE:</b> Stop after 2 misses or after window expires.`;
 }
-
-document.getElementById("analyzeBtn").addEventListener("click", analyze);
 </script>
 
 </body>
