@@ -3,93 +3,150 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart Roulette Neighbor Predictor</title>
+<title>Pro-Level Roulette Analyzer</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
 #box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
-textarea { width:90%; height:80px; margin:6px; padding:6px; border-radius:4px; background:#222; color:#fff; border:none; font-size:1em; }
-#status, #prediction { margin:6px; padding:6px; background:#222; border-radius:6px; }
+input { width:95%; padding:6px; margin:2px; }
+#output { margin-top:10px; padding:10px; background:#222; border-radius:6px; text-align:left; }
 </style>
 </head>
 <body>
 
-<header>Smart Roulette Neighbor Predictor</header>
+<header>Pro-Level Roulette Analyzer</header>
 
 <div id="box">
-  <b>Paste last 100+ spins:</b><br>
-  <textarea id="spinInput" placeholder="Ex: 10,23,5,18,..."></textarea>
+<b>Paste last 100+ numbers (spaces optional, 0–36):</b><br>
+<input id="numbersInput" placeholder="e.g. 2318192312 30 4 5 36 0 10 23" />
+<button onclick="analyzeNumbers()">Analyze</button>
 </div>
 
 <div id="box">
-  <b>Paste last 14 spins (momentum):</b><br>
-  <textarea id="last14Input" placeholder="Ex: 8,10,23,..."></textarea>
+<b>Add latest spin result:</b><br>
+<input id="latestSpin" placeholder="e.g. 23" />
+<button onclick="addLatestSpin()">Update Momentum</button>
 </div>
 
-<div id="box">
-  <button onclick="analyzeAll()">Analyze</button>
+<div id="output">
+<div id="status">Status: Waiting…</div>
+<div id="macroSector"></div>
+<div id="topNumbers"></div>
+<div id="nextPredictions"></div>
 </div>
-
-<div id="status">Status: Waiting for input…</div>
-<div id="prediction">Next Prediction: --</div>
 
 <script>
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,
-22,18,29,7,28,12,35,3,26];
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+let allNumbers = [];
 
-function parseNumbers(str){
-  return str.split(/[\s,]+/).map(Number).filter(n=>!isNaN(n) && n>=0 && n<=36);
+// Automatic cleaning of pasted numbers
+function cleanNumbers(raw){
+    const cleaned = raw.replace(/[^0-9]/g,'');
+    const numbers = [];
+    let i=0;
+    while(i < cleaned.length){
+        if(cleaned[i]==='0'){
+            numbers.push(0);
+            i++;
+        } else {
+            let two = cleaned.substr(i,2);
+            let one = cleaned[i];
+            if(parseInt(two)>=10 && parseInt(two)<=36){
+                numbers.push(parseInt(two));
+                i+=2;
+            } else {
+                numbers.push(parseInt(one));
+                i++;
+            }
+        }
+    }
+    return numbers;
 }
 
-function weightedPrediction(nums, last14){
-  // Combine nums + last14 with higher weight for last14
-  const freq = Array(37).fill(0);
-  nums.forEach(n=> freq[n]+=1);
-  last14.forEach(n=> freq[n]+=3); // last14 weighted more
-
-  // Top frequency number
-  const topIdx = freq.indexOf(Math.max(...freq));
-
-  // Neighbor of top number (1 clockwise)
-  const neighbor = wheel[(wheel.indexOf(topIdx)+1)%37];
-
-  // Predict next 12 spins using weighted probabilities
-  const tempFreq = [...freq];
-  const next12 = [];
-  for(let i=0;i<12;i++){
-    let max = Math.max(...tempFreq);
-    let idx = tempFreq.indexOf(max);
-    next12.push(idx);
-    tempFreq[idx]=0;
-  }
-
-  return {top: topIdx, neighbor, next12};
+// Analyze pasted numbers
+function analyzeNumbers() {
+    const raw = document.getElementById('numbersInput').value;
+    if(!raw) return alert("Paste the numbers first!");
+    allNumbers = cleanNumbers(raw);
+    if(allNumbers.length<30) return alert("Need at least 30 numbers!");
+    calculatePredictions();
 }
 
-function analyzeAll(){
-  const nums = parseNumbers(document.getElementById('spinInput').value.trim());
-  const last14 = parseNumbers(document.getElementById('last14Input').value.trim());
+// Add latest spin
+function addLatestSpin() {
+    const val = parseInt(document.getElementById('latestSpin').value);
+    if(isNaN(val) || val<0 || val>36) return alert("Enter a valid number 0–36");
+    allNumbers.push(val);
+    if(allNumbers.length>200) allNumbers.shift(); // keep last 200 numbers
+    calculatePredictions();
+}
 
-  if(nums.length<30) { 
-    document.getElementById('status').innerText="Enter at least 30 previous spins.";
-    return;
-  }
-  if(last14.length<5){
-    document.getElementById('status').innerText="Enter at least 5 numbers for last 14.";
-    return;
-  }
+// Prediction engine
+function calculatePredictions() {
+    const last100 = allNumbers.slice(-100);
+    document.getElementById('status').innerText = `Analyzing last ${last100.length} numbers…`;
 
-  document.getElementById('status').innerText="Analyzing…";
+    // Weighted heatmap (last 20 numbers weighted higher)
+    const heat = Array(37).fill(0);
+    last100.forEach((n,index)=>{
+        const weight = index > last100.length-20 ? 2 : 1;
+        const idx = wheel.indexOf(n);
+        for(let i=-1;i<=1;i++) heat[(idx+i+37)%37]+=weight;
+    });
 
-  const result = weightedPrediction(nums,last14);
+    // Macro sectors (top 3)
+    const sectorScores = [];
+    for(let start=0; start<37; start++){
+        let sum=0;
+        for(let j=0;j<10;j++) sum+=heat[(start+j)%37];
+        sectorScores.push({start,sum});
+    }
+    sectorScores.sort((a,b)=>b.sum-a.sum);
+    const top3Sectors = sectorScores.slice(0,3).map(s=>{
+        const nums = [];
+        for(let j=0;j<10;j++) nums.push(wheel[(s.start+j)%37]);
+        return nums;
+    });
+    document.getElementById('macroSector').innerHTML = "<b>Top 3 Macro Sectors:</b><br>" + top3Sectors.map((s,i)=>`Sector ${i+1}: ${s.join(", ")}`).join("<br>");
 
-  document.getElementById('prediction').innerHTML =
-    `<b>Next Spin Prediction:</b> ${result.top} | <b>Neighbor:</b> ${result.neighbor}<br>
-     <b>Next 12 Spins Prediction:</b> ${result.next12.join(", ")}`;
+    // Top numbers frequency
+    const freq = {};
+    last100.forEach(n=>freq[n]=(freq[n]||0)+1);
+    const sortedFreq = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+    const topNumbers = sortedFreq.slice(0,10).map(x=>x[0]);
+    document.getElementById('topNumbers').innerHTML = "<b>Top 10 Numbers:</b> " + topNumbers.join(", ");
 
-  document.getElementById('status').innerText="✅ Analysis Complete";
+    // Next 10 spins predictions (single highest probability neighbor, 12-step chain)
+    const predictions = [];
+    const tempNumbers = last100.slice();
+    for(let k=0;k<10;k++){
+        // Frequency weighted prediction
+        const probMap = {};
+        tempNumbers.forEach(n=>{
+            const idx = wheel.indexOf(n);
+            const neighbor = wheel[(idx+1)%37]; // single neighbor
+            probMap[neighbor] = (probMap[neighbor]||0)+1;
+        });
+        // Find highest probability
+        const sortedProb = Object.entries(probMap).sort((a,b)=>b[1]-a[1]);
+        const predicted = parseInt(sortedProb[0][0]);
+
+        // Build 12-step neighbor chain
+        const chain = [];
+        let idx = wheel.indexOf(predicted);
+        for(let step=0; step<12; step++){
+            idx = (idx+1)%37;
+            chain.push(wheel[idx]);
+        }
+
+        predictions.push({predicted, neighborChain: chain, chance: ((sortedProb[0][1]/tempNumbers.length)*100).toFixed(1)});
+        tempNumbers.push(predicted);
+        tempNumbers.shift();
+    }
+
+    document.getElementById('nextPredictions').innerHTML = "<b>Next 10 Spins Predictions (single highest probability neighbor + 12-step chain):</b><br>" +
+        predictions.map((p,i)=>`Spin ${i+1}: ${p.predicted} | Chain: ${p.neighborChain.join(", ")} (Chance: ${p.chance}%)`).join("<br>");
 }
 </script>
 
