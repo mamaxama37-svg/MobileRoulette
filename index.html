@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF_toggle">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Roulette Neighbor Intelligence v2</title>
+<title>Roulette Neighbor Intelligence</title>
 
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
 .box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-textarea { width:95%; height:80px; background:#000; color:#0f0; }
+textarea { width:95%; height:90px; background:#000; color:#0f0; }
 button { padding:10px; font-size:1em; margin-top:10px; }
 .good { color:#0f0; }
 .warn { color:#ff0; }
@@ -22,13 +22,13 @@ button { padding:10px; font-size:1em; margin-top:10px; }
 <header>Advanced Roulette Neighbor Intelligence</header>
 
 <div class="box">
-<b>Last 100 Numbers (include last 14 here)</b><br>
+<b>Last 100 Numbers (paste here)</b><br>
 <textarea id="history"></textarea>
 </div>
 
-<button onclick="analyze()">Analyze Next Spin</button>
+<button id="analyzeBtn">Analyze Next Spin</button>
 
-<div class="box" id="out"></div>
+<div class="box" id="output">Waiting for input…</div>
 
 <script>
 const wheel = [
@@ -37,54 +37,65 @@ const wheel = [
 22,18,29,7,28,12,35,3,26
 ];
 
-function parse(txt){
-  return txt.split(/[\s,]+/).map(n=>+n).filter(n=>n>=0 && n<=36);
+function parseNumbers(text){
+  return text
+    .split(/[\s,]+/)
+    .map(n => Number(n))
+    .filter(n => n >= 0 && n <= 36);
 }
 
 function analyze(){
-  const nums = parse(history.value).slice(-100);
+  const historyEl = document.getElementById("history");
+  const outputEl = document.getElementById("output");
+
+  const nums = parseNumbers(historyEl.value).slice(-100);
+
   if(nums.length < 60){
-    out.innerHTML = "<span class='bad'>Need at least 60 numbers</span>";
+    outputEl.innerHTML = "<span class='bad'>Need at least 60 numbers</span>";
     return;
   }
 
   const score = Array(37).fill(0);
 
-  // Main decay-weighted history
   nums.forEach((n,i)=>{
-    const w = Math.pow((i+1)/nums.length, 1.3);
+    const weight = Math.pow((i+1)/nums.length, 1.4);
     const idx = wheel.indexOf(n);
     for(let d=-2; d<=2; d++){
-      score[(idx+d+37)%37] += w;
+      score[(idx+d+37)%37] += weight;
     }
   });
 
-  // Anti-repeat penalty (very important)
+  // Anti-repeat
   const last = nums[nums.length-1];
-  score[wheel.indexOf(last)] *= 0.25;
+  score[wheel.indexOf(last)] *= 0.2;
 
-  // Find strongest point
-  let best = score.indexOf(Math.max(...score));
-  const target = wheel[best];
+  const bestIndex = score.indexOf(Math.max(...score));
+  const target = wheel[bestIndex];
 
-  // ±3 neighbors only
-  let zone=[];
+  // ±3 neighbors
+  const zone=[];
   for(let i=-3;i<=3;i++){
-    zone.push(wheel[(best+i+37)%37]);
+    zone.push(wheel[(bestIndex+i+37)%37]);
   }
 
-  // Confidence calculation
+  // Confidence logic
   const recent = nums.slice(-14);
-  const hits = recent.filter(n=>zone.includes(n)).length;
-  const confidence = hits >= 4 ? "PLAY" : hits >= 2 ? "WAIT" : "SKIP";
+  const hits = recent.filter(n => zone.includes(n)).length;
+  let signal = "SKIP";
+  let cls = "bad";
 
-  out.innerHTML = `
+  if(hits >= 4){ signal="PLAY"; cls="good"; }
+  else if(hits >= 2){ signal="WAIT"; cls="warn"; }
+
+  outputEl.innerHTML = `
     <b>Primary Target:</b> <span class="good">${target}</span><br><br>
     <b>Bet Zone (±3 neighbors):</b><br>${zone.join(", ")}<br><br>
-    <b>Recent Hits (last 14):</b> ${hits}<br>
-    <b>Signal:</b> <span class="${confidence==='PLAY'?'good':confidence==='WAIT'?'warn':'bad'}">${confidence}</span>
+    <b>Hits in last 14:</b> ${hits}<br>
+    <b>Signal:</b> <span class="${cls}">${signal}</span>
   `;
 }
+
+document.getElementById("analyzeBtn").addEventListener("click", analyze);
 </script>
 
 </body>
