@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Roulette Analyzer - Live OCR + Physics</title>
+<title>Smart Roulette Predictor</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial,sans-serif; margin:0; text-align:center; }
 header { background:#111; padding:10px; font-size:1.3em; }
 #videoContainer { position:relative; margin:10px auto; width:100%; max-width:600px; }
 video { width:100%; border:2px solid #fff; }
 canvas { display:block; margin:0 auto; border:1px solid #333; }
+button { margin:6px; padding:6px 12px; font-size:1em; }
 #output { margin:10px; padding:10px; background:#111; border-radius:6px; }
 .statBox { margin:5px; padding:8px; background:#222; border-radius:5px; }
 #heatmap span { display:inline-block; width:28px; margin:2px; padding:4px; border-radius:4px; font-size:0.9em; }
@@ -20,49 +21,49 @@ canvas { display:block; margin:0 auto; border:1px solid #333; }
 </head>
 <body>
 
-<header>Pro Roulette Analyzer - Live OCR + Physics</header>
+<header>Smart Roulette Predictor</header>
 
 <div id="videoContainer">
   <video id="rouletteVideo" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 </div>
 
+<div>
+  <button onclick="captureLastNumbers()">📸 Capture Last 100 Numbers</button>
+</div>
+
 <div id="output">
   <div class="statBox" id="predNumber">Predicted Number: --</div>
   <div class="statBox" id="neighbor">Best Neighbor: --</div>
   <div class="statBox" id="speed">Ball Speed: -- rad/s</div>
-  <div class="statBox" id="topSectors">Top 3 Sectors: --</div>
 </div>
 
 <div id="heatmap"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-// ===== WHEEL MODEL =====
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-               30,8,23,10,5,24,16,33,1,20,14,31,9,
-               22,18,29,7,28,12,35,3,26];
+// --- WHEEL ---
+const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+             30,8,23,10,5,24,16,33,1,20,14,31,9,
+             22,18,29,7,28,12,35,3,26];
+let history=[];
 
-let history = [];
+// --- CAMERA ---
+const video=document.getElementById('rouletteVideo');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+let prevAngle=null, prevTime=null, currentSpeed=0;
 
-// ===== CAMERA SETUP =====
-const video = document.getElementById('rouletteVideo');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-let prevAngle = null, prevTime = null, currentSpeed = 0;
+navigator.mediaDevices.getUserMedia({ video: { facingMode:"environment" }, audio:false })
+  .then(s=>video.srcObject=s).catch(e=>alert("Camera error: "+e));
 
-// Back camera
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
-  .then(stream => { video.srcObject = stream; })
-  .catch(err => { alert("Camera error: "+err); });
-
-// ===== BALL DETECTION =====
+// --- BALL DETECTION ---
 function detectBall(){
   const img = ctx.getImageData(0,0,canvas.width,canvas.height);
   const data = img.data;
   for(let i=0;i<data.length;i+=4){
     const r=data[i], g=data[i+1], b=data[i+2];
-    if(r>200 && g>200 && b>200){ // bright pixel
+    if(r>200 && g>200 && b>200){ 
       const px=(i/4)%canvas.width;
       const py=Math.floor((i/4)/canvas.width);
       return {x:px,y:py};
@@ -71,71 +72,79 @@ function detectBall(){
   return null;
 }
 
-// ===== BALL PHYSICS =====
 function trackBall(ball){
   if(!ball) return null;
-  const cx = canvas.width/2, cy = canvas.height/2;
-  const now = performance.now();
-  const angle = Math.atan2(ball.y-cy, ball.x-cx);
+  const cx=canvas.width/2, cy=canvas.height/2;
+  const now=performance.now();
+  const angle=Math.atan2(ball.y-cy, ball.x-cx);
   if(prevAngle!==null){
-    const dt = (now-prevTime)/1000;
-    currentSpeed = angle-prevAngle;
+    const dt=(now-prevTime)/1000;
+    currentSpeed=(angle-prevAngle)/dt;
   }
-  prevAngle = angle;
-  prevTime = now;
+  prevAngle=angle;
+  prevTime=now;
   return angle;
 }
 
-function predictPhysics(currentAngle, speed, deceleration=0.05){
-  const segmentsLeft = Math.round((speed*speed)/(2*deceleration));
-  const idx = Math.floor((currentAngle + Math.PI)/(2*Math.PI) * 37);
-  const predictedIdx = (idx + segmentsLeft)%37;
+// --- PREDICTION ---
+function predictNextNumber(angle, speed){
+  const segmentsLeft = Math.round(speed*speed/0.05);
+  const idx = Math.floor((angle+Math.PI)/(2*Math.PI)*37);
+  const predictedIdx=(idx+segmentsLeft)%37;
   return wheel[predictedIdx];
 }
 
-// ===== OCR DETECTION =====
-async function detectNumbersFromVideo(){
-  if(!video.videoWidth) return;
-
-  // Optional: define the region of last results on the table
-  const sx = 0, sy = canvas.height-100, sw = canvas.width, sh = 100;
-  const tempCanvas = document.createElement("canvas");
-  tempCanvas.width = sw; tempCanvas.height = sh;
-  const tctx = tempCanvas.getContext("2d");
-  tctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-
-  try{
-    const result = await Tesseract.recognize(tempCanvas, 'eng', { tessjs_create_hocr: '0', tessjs_create_tsv: '0' });
-    const nums = result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-    if(nums){
-      history = nums.map(Number).slice(-100);
-    }
-  } catch(e){ console.log("OCR error:", e); }
+function bestNeighbor(pred){
+  const idx=wheel.indexOf(pred);
+  return wheel[(idx+1)%37]; // one neighbor
 }
 
-// ===== SECTOR ANALYSIS =====
+// --- OCR CAPTURE ---
+async function captureLastNumbers(){
+  if(!video.videoWidth) return alert("Camera not ready");
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+  const sx=0, sy=canvas.height-100, sw=canvas.width, sh=100;
+  const temp=document.createElement("canvas");
+  temp.width=sw; temp.height=sh;
+  temp.getContext("2d").drawImage(video,sx,sy,sw,sh,0,0,sw,sh);
+
+  document.getElementById("predNumber").innerText="OCR scanning…";
+
+  try{
+    const result=await Tesseract.recognize(temp,'eng');
+    const nums=result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+    if(!nums || nums.length<10) return alert("OCR failed, show clear numbers");
+    history=nums.map(Number).slice(-100);
+    document.getElementById("predNumber").innerText="OCR captured: "+history.join(", ");
+  }catch(e){console.log("OCR error:", e);}
+}
+
+// --- ANALYZE SECTORS ---
 function analyzeSectors(){
   if(history.length<10) return [];
-  const heat = Array(37).fill(0);
+  const heat=Array(37).fill(0);
   history.forEach(n=>{
-    const idx = wheel.indexOf(n);
+    const idx=wheel.indexOf(n);
     for(let i=-1;i<=1;i++) heat[(idx+i+37)%37]++;
   });
-  const sectors = wheel.map((n,i)=>({num:n,score:heat[i]}));
-  sectors.sort((a,b)=>b.score-a.score);
-  const top3 = sectors.slice(0,3).map(x=>x.num);
+  const top3=wheel.map((n,i)=>({num:n,score:heat[i]}))
+                  .sort((a,b)=>b.score-a.score)
+                  .slice(0,3)
+                  .map(x=>x.num);
   drawHeatmap(heat);
-  document.getElementById("topSectors").innerText = "Top 3 Sectors: "+top3.join(", ");
   return top3;
 }
 
 function drawHeatmap(heat){
   const el=document.getElementById("heatmap");
   el.innerHTML="";
-  const max = Math.max(...heat);
+  const max=Math.max(...heat);
   heat.forEach((h,i)=>{
-    const s = document.createElement("span");
-    s.innerText = wheel[i];
+    const s=document.createElement("span");
+    s.innerText=wheel[i];
     if(h>max*0.7) s.className="hot";
     else if(h>max*0.4) s.className="warm";
     else s.className="cold";
@@ -143,40 +152,30 @@ function drawHeatmap(heat){
   });
 }
 
-// ===== UPDATE UI =====
 function updateUI(pred, neighbor){
-  document.getElementById('predNumber').innerText="Predicted Number: "+pred;
-  document.getElementById('neighbor').innerText="Best Neighbor: "+neighbor;
-  document.getElementById('speed').innerText="Ball Speed: "+currentSpeed.toFixed(3)+" rad/s";
+  document.getElementById("predNumber").innerText="Predicted Number: "+pred;
+  document.getElementById("neighbor").innerText="Best Neighbor: "+neighbor;
+  document.getElementById("speed").innerText="Ball Speed: "+currentSpeed.toFixed(3)+" rad/s";
 }
 
-// ===== MAIN LOOP =====
-async function analyzeFrame(){
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+// --- MAIN LOOP ---
+function analyzeFrame(){
+  if(!video.videoWidth) return requestAnimationFrame(analyzeFrame);
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  // Detect ball & physics
-  const ball = detectBall();
+  const ball=detectBall();
   if(ball){
-    const angle = trackBall(ball);
-    const pred = predictPhysics(angle,currentSpeed);
-    const idx = wheel.indexOf(pred);
-    const neighbor = wheel[(idx+1)%37];
-    updateUI(pred, neighbor);
+    const angle=trackBall(ball);
+    const pred=predictNextNumber(angle,currentSpeed);
+    const neighbor=bestNeighbor(pred);
+    updateUI(pred,neighbor);
   }
-
-  // OCR every 1 second to reduce lag
-  if(!window.lastOCRTime || performance.now() - window.lastOCRTime > 1000){
-    await detectNumbersFromVideo();
-    analyzeSectors();
-    window.lastOCRTime = performance.now();
-  }
-
   requestAnimationFrame(analyzeFrame);
 }
 
-video.onloadedmetadata = () => analyzeFrame();
+video.onloadedmetadata=()=>analyzeFrame();
 </script>
 
 </body>
