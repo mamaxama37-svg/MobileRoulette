@@ -1,97 +1,95 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Roulette Precision Analyzer</title>
+<title>Smart Roulette Neighbor Predictor</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial; text-align:center; }
-textarea { width:95%; height:120px; background:#111; color:#0f0; }
-button { padding:10px; margin:10px; font-size:1em; }
-.box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-.good { color:#0f0; }
-.warn { color:#ff0; }
-.bad { color:#f33; }
+body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
+header { background:#111; padding:12px; font-size:1.3em; }
+#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
+button { padding:8px 12px; margin:6px; font-size:1em; }
+textarea { width:90%; height:80px; margin:6px; padding:6px; border-radius:4px; background:#222; color:#fff; border:none; font-size:1em; }
+#status, #prediction { margin:6px; padding:6px; background:#222; border-radius:6px; }
 </style>
 </head>
 <body>
 
-<h2>Roulette Precision Analyzer</h2>
+<header>Smart Roulette Neighbor Predictor</header>
 
-<div class="box">
-<b>Paste last results (space or comma separated)</b><br>
-<textarea id="input"></textarea><br>
-<button onclick="analyze()">Analyze</button>
+<div id="box">
+  <b>Paste last 100+ spins:</b><br>
+  <textarea id="spinInput" placeholder="Ex: 10,23,5,18,..."></textarea>
 </div>
 
-<div class="box" id="output"></div>
+<div id="box">
+  <b>Paste last 14 spins (momentum):</b><br>
+  <textarea id="last14Input" placeholder="Ex: 8,10,23,..."></textarea>
+</div>
+
+<div id="box">
+  <button onclick="analyzeAll()">Analyze</button>
+</div>
+
+<div id="status">Status: Waiting for input…</div>
+<div id="prediction">Next Prediction: --</div>
 
 <script>
-const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+30,8,23,10,5,24,16,33,1,20,14,31,9,
+22,18,29,7,28,12,35,3,26];
 
-function analyze(){
-  const raw=document.getElementById("input").value;
-  let nums=raw.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-  if(!nums||nums.length<30){
-    document.getElementById("output").innerText="Need at least 30 numbers.";
+function parseNumbers(str){
+  return str.split(/[\s,]+/).map(Number).filter(n=>!isNaN(n) && n>=0 && n<=36);
+}
+
+function weightedPrediction(nums, last14){
+  // Combine nums + last14 with higher weight for last14
+  const freq = Array(37).fill(0);
+  nums.forEach(n=> freq[n]+=1);
+  last14.forEach(n=> freq[n]+=3); // last14 weighted more
+
+  // Top frequency number
+  const topIdx = freq.indexOf(Math.max(...freq));
+
+  // Neighbor of top number (1 clockwise)
+  const neighbor = wheel[(wheel.indexOf(topIdx)+1)%37];
+
+  // Predict next 12 spins using weighted probabilities
+  const tempFreq = [...freq];
+  const next12 = [];
+  for(let i=0;i<12;i++){
+    let max = Math.max(...tempFreq);
+    let idx = tempFreq.indexOf(max);
+    next12.push(idx);
+    tempFreq[idx]=0;
+  }
+
+  return {top: topIdx, neighbor, next12};
+}
+
+function analyzeAll(){
+  const nums = parseNumbers(document.getElementById('spinInput').value.trim());
+  const last14 = parseNumbers(document.getElementById('last14Input').value.trim());
+
+  if(nums.length<30) { 
+    document.getElementById('status').innerText="Enter at least 30 previous spins.";
     return;
   }
-  nums=nums.map(Number);
-  const N=nums.length;
-
-  const score=Array(37).fill(0);
-
-  nums.forEach((n,i)=>{
-    const idx=wheel.indexOf(n);
-    let weight=1;
-    if(i>N-10) weight=1.6;
-    else if(i>N-30) weight=1.2;
-
-    [-2,-1,0,1,2].forEach(d=>{
-      const w=[0.3,0.6,1,0.6,0.3][d+2];
-      score[(idx+d+37)%37]+=w*weight;
-    });
-  });
-
-  const ranked=score
-    .map((s,i)=>({n:wheel[i],s}))
-    .sort((a,b)=>b.s-a.s);
-
-  const core=ranked[0].n;
-  const idx=wheel.indexOf(core);
-  const sector=[];
-  for(let i=-2;i<=2;i++) sector.push(wheel[(idx+i+37)%37]);
-
-  // --- FORECAST ANALYSIS ---
-  const recent5 = nums.slice(-5);
-  const recent10 = nums.slice(-10);
-  const recent20 = nums.slice(-20);
-
-  const hitRate = arr => arr.filter(n=>sector.includes(n)).length / arr.length;
-
-  const r5 = hitRate(recent5);
-  const r10 = hitRate(recent10);
-  const r20 = hitRate(recent20);
-
-  let windowText="", windowClass="";
-  if(r5>0.4 && r10>0.3){
-    windowText="Strong for next 2–4 spins";
-    windowClass="good";
-  } else if(r10>0.25){
-    windowText="Medium for spins 3–6";
-    windowClass="warn";
-  } else {
-    windowText="Weak – avoid extended betting";
-    windowClass="bad";
+  if(last14.length<5){
+    document.getElementById('status').innerText="Enter at least 5 numbers for last 14.";
+    return;
   }
 
-  document.getElementById("output").innerHTML=
-    `<b>CORE NUMBER:</b> ${core}<br><br>
-     <b>NEIGHBORS (±2):</b><br>${sector.join(", ")}<br><br>
-     <b>TOP 5 RANKED:</b><br>${ranked.slice(0,5).map(r=>r.n).join(", ")}<br><br>
-     <b>FORECAST WINDOW:</b><br>
-     <span class="${windowClass}">${windowText}</span><br><br>
-     <b>RULE:</b> Stop after 2 misses or after window expires.`;
+  document.getElementById('status').innerText="Analyzing…";
+
+  const result = weightedPrediction(nums,last14);
+
+  document.getElementById('prediction').innerHTML =
+    `<b>Next Spin Prediction:</b> ${result.top} | <b>Neighbor:</b> ${result.neighbor}<br>
+     <b>Next 12 Spins Prediction:</b> ${result.next12.join(", ")}`;
+
+  document.getElementById('status').innerText="✅ Analysis Complete";
 }
 </script>
 
