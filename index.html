@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Roulette Analyzer - Optimized</title>
+<title>Mobile Roulette Analyzer - Optimized Smooth</title>
 <style>
 body {margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
 header{background:#111;padding:10px;font-size:1.3em;}
 #videoContainer{position:relative;width:100%;max-width:600px;margin:auto;}
-canvas{width:100%;height:auto; border:2px solid #fff;}
+canvas{width:100%;height:auto;border:2px solid #fff;}
 .statBox{background:#222;padding:8px;margin:4px;border-radius:5px;}
 #stats{margin-top:10px;font-size:0.9em;}
 </style>
@@ -32,7 +32,6 @@ canvas{width:100%;height:auto; border:2px solid #fff;}
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-/* ===== Wheel Setup ===== */
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
 22,18,29,7,28,12,35,3,26];
@@ -41,27 +40,29 @@ let history=[], lastNumber=-1;
 let prevAngle=null, prevTime=null, currentSpeed=0;
 let topSectors=[], topNeighbors=[];
 
-/* ===== Video + Canvas ===== */
 const video=document.getElementById('cameraVideo');
 const canvas=document.getElementById('overlay');
 const ctx=canvas.getContext('2d');
 
-/* ===== Back Camera ===== */
+// Processing offscreen canvas
+const procCanvas=document.createElement('canvas');
+const procCtx=procCanvas.getContext('2d');
+
+// Back camera, low resolution for performance
 navigator.mediaDevices.getUserMedia({
-  video:{facingMode:"environment", width:640, height:480}
+  video:{facingMode:"environment", width:320, height:240}
 }).then(stream => video.srcObject = stream)
 .catch(e=>alert("Camera access denied or unavailable"));
 
-/* ===== Wheel Center Detection ===== */
+// Detect wheel center
 function detectWheel(frameCtx){
   const w=frameCtx.canvas.width;
   const h=frameCtx.canvas.height;
-  const cx=w/2, cy=h/2, radius=Math.min(w,h)/3;
-  return {cx, cy, radius};
+  return {cx:w/2, cy:h/2, radius:Math.min(w,h)/3};
 }
 
-/* ===== Ball Detection ===== */
-function detectBall(frameCtx, wheelCenter){
+// Detect ball using sampling every 4 pixels
+function detectBall(frameCtx,wheelCenter){
   const w=frameCtx.canvas.width;
   const h=frameCtx.canvas.height;
   const img=frameCtx.getImageData(0,0,w,h);
@@ -79,7 +80,7 @@ function detectBall(frameCtx, wheelCenter){
   return brightest.max>200?{x:brightest.x,y:brightest.y}:null;
 }
 
-/* ===== Track Ball Motion ===== */
+// Track ball motion
 function trackBall(ball,wheelCenter){
   const now=performance.now();
   const angle=Math.atan2(ball.y-wheelCenter.cy, ball.x-wheelCenter.cx);
@@ -90,23 +91,26 @@ function trackBall(ball,wheelCenter){
   prevAngle=angle; prevTime=now;
 }
 
-/* ===== Number OCR Area ===== */
+// OCR detection region
 function getNumberRegion(wheelCenter){
   const size=wheelCenter.radius*0.5;
   return {x:wheelCenter.cx-size, y:wheelCenter.cy-size, w:size*2, h:size};
 }
 
-/* ===== OCR Number Detection ===== */
+// OCR every 3 seconds
 let lastOCR=0;
-const OCR_INTERVAL=1000;
+const OCR_INTERVAL=3000;
 
 async function detectNumber(region){
   const now=performance.now();
   if(now-lastOCR<OCR_INTERVAL) return;
   lastOCR=now;
-  const numberRegion=ctx.getImageData(region.x,region.y,region.w,region.h);
+  // draw to processing canvas
+  procCanvas.width=region.w;
+  procCanvas.height=region.h;
+  procCtx.drawImage(canvas,region.x,region.y,region.w,region.h,0,0,region.w,region.h);
   try{
-    const result=await Tesseract.recognize(numberRegion,'eng');
+    const result=await Tesseract.recognize(procCanvas,'eng');
     const num=parseInt(result.data.text.replace(/\D/g,''));
     if(!isNaN(num)&&num>=0&&num<=36 && num!==lastNumber){
       lastNumber=num;
@@ -117,7 +121,7 @@ async function detectNumber(region){
   }catch(e){console.log("OCR failed",e);}
 }
 
-/* ===== Predictions ===== */
+// Predictions
 function updatePredictions(){
   if(history.length===0) return;
   const counts=Array(37).fill(0);
@@ -142,16 +146,16 @@ function updatePredictions(){
   document.getElementById('topNeighbors').innerText="Top 5 Neighbors: "+topNeighbors.join(", ");
 }
 
-/* ===== Analyze Frame ===== */
+// Main frame loop
 async function analyzeFrame(){
   canvas.width=video.videoWidth;
   canvas.height=video.videoHeight;
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  
+
   const wheelCenter=detectWheel(ctx);
   const ball=detectBall(ctx,wheelCenter);
   if(ball) trackBall(ball,wheelCenter);
-  
+
   const region=getNumberRegion(wheelCenter);
   await detectNumber(region);
 
