@@ -3,130 +3,173 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Roulette Analyzer - Live Camera</title>
+<title>Live Roulette Analyzer Pro</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial,sans-serif; text-align:center; margin:0; padding:0; }
+body { margin:0; font-family:sans-serif; background:#000; color:#fff; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
-#videoContainer { margin:10px auto; max-width:600px; position:relative; }
+#videoContainer { position:relative; margin:10px auto; max-width:600px; }
 video { width:100%; border:2px solid #fff; }
-button { margin:8px; padding:8px 12px; font-size:1em; }
-#outputBox { margin:10px; padding:10px; background:#1a1a1a; border-radius:6px; }
-#numbersDetected, #macroSector, #topNumber, #neighbor { margin:6px 0; }
+canvas { display:none; }
+#overlay { position:absolute; top:0; left:0; pointer-events:none; }
+#stats { margin-top:10px; }
+.statBox { background:#222; padding:8px; margin:4px; border-radius:5px; display:inline-block; min-width:120px; }
+button { padding:6px 10px; margin:6px; }
 </style>
 </head>
 <body>
 
-<header>Mobile Roulette Analyzer</header>
+<header>Live Roulette Analyzer Pro</header>
 
 <div id="videoContainer">
-  <video id="camera" autoplay playsinline></video>
+  <video id="rouletteVideo" autoplay muted playsinline></video>
+  <canvas id="overlay"></canvas>
 </div>
 
-<button id="captureBtn">📸 Capture Last 100 Numbers</button>
-
-<div id="outputBox">
-  <div id="status">Waiting for capture…</div>
-  <div id="numbersDetected"></div>
-  <div id="macroSector"></div>
-  <div id="topNumber"></div>
-  <div id="neighbor"></div>
+<div id="controls">
+  <button id="captureNumbers">Capture Last 100 Numbers</button>
 </div>
 
-<canvas id="canvas" style="display:none;"></canvas>
+<div id="stats">
+  <div class="statBox" id="lastNumbers">Last Numbers: --</div>
+  <div class="statBox" id="macroSector">Macro Sector: --</div>
+  <div class="statBox" id="neighborPred">Next Neighbor: --</div>
+  <div class="statBox" id="topNumbers">Top Numbers: --</div>
+  <div class="statBox" id="ballSpeed">Ball Speed: -- rad/s</div>
+</div>
+
+<canvas id="canvas"></canvas>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-// ---- WHEEL MODEL ----
-const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,
-22,18,29,7,28,12,35,3,26];
+// ===== Camera Setup =====
+const video = document.getElementById('rouletteVideo');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
 
-let lastNumbers=[];
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+  .then(stream => { video.srcObject = stream; })
+  .catch(err => console.error("Camera error:", err));
 
-// ---- CAMERA SETUP ----
-const video=document.getElementById('camera');
-const canvas=document.getElementById('canvas');
-const ctx=canvas.getContext('2d');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
 
-async function startCamera(){
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { exact: "environment" } }, // back camera
-      audio: false
-    });
-    video.srcObject=stream;
-  } catch(err){
-    alert("Camera access failed: "+err);
-  }
-}
-startCamera();
+// ===== Roulette Wheel =====
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+  30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 
-// ---- PREPROCESS FRAME ----
-function preprocessFrame(){
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
+let lastNumbers = [];
+let macroSector = [];
+let prevAngle = null, prevTime = null, ballSpeed = 0;
+
+// ===== Capture Last 100 Numbers =====
+document.getElementById('captureNumbers').addEventListener('click', async ()=>{
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  let imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
-  let data=imgData.data;
-  // Convert to grayscale + threshold to remove red/black/green squares
-  for(let i=0;i<data.length;i+=4){
-    let r=data[i], g=data[i+1], b=data[i+2];
-    let brightness=0.299*r+0.587*g+0.114*b;
-    // Simple threshold
-    data[i]=data[i+1]=data[i+2]=brightness>100?255:0;
-  }
-  ctx.putImageData(imgData,0,0);
-}
 
-// ---- CAPTURE & OCR ----
-document.getElementById('captureBtn').addEventListener('click', async ()=>{
-  document.getElementById('status').innerText="Processing...";
-  preprocessFrame();
-  const dataUrl=canvas.toDataURL('image/png');
-  
+  document.getElementById('lastNumbers').innerText = "Detecting numbers…";
+
   try{
-    const result = await Tesseract.recognize(dataUrl,'eng',{
-      logger:m=>console.log(m)
+    const result = await Tesseract.recognize(canvas,{
+      lang:'eng',
+      tessedit_char_whitelist:'0123456789'
     });
+
     let nums = result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-    if(!nums || nums.length<50) return alert("OCR failed, show clear numbers.");
-    nums = nums.map(Number).slice(-100); // last 100 numbers
-    lastNumbers=nums;
-    document.getElementById('numbersDetected').innerText="Detected Numbers: "+nums.join(", ");
-    runPrediction(nums);
-  } catch(e){
-    alert("OCR failed: "+e);
+    if(!nums || nums.length<1) return alert("OCR failed: show clear numbers");
+
+    lastNumbers = nums.map(Number).slice(-100);
+    document.getElementById('lastNumbers').innerText = "Last Numbers: "+lastNumbers.join(", ");
+
+    computeMacroSector();
+    predictNextNeighbor();
+    highlightTopNumbers();
+  } catch(err){
+    console.error(err);
+    alert("OCR error");
   }
 });
 
-// ---- PREDICTION LOGIC ----
-function runPrediction(history){
-  // --- Macro Sector Top 3 ---
-  const heat=Array(37).fill(0);
-  history.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    for(let i=-2;i<=2;i++) heat[(idx+i+37)%37]++;
+// ===== Compute Macro Sector =====
+function computeMacroSector(){
+  const heat = Array(37).fill(0);
+  lastNumbers.forEach(n=>{
+    const idx = wheel.indexOf(n);
+    for(let i=-1;i<=1;i++) heat[(idx+i+37)%37]++;
   });
-  let topSector=[];
-  for(let i=0;i<3;i++){
-    let max=Math.max(...heat);
-    let idx=heat.indexOf(max);
-    topSector.push(wheel[idx]);
-    heat[idx]=0; // remove from next pick
+
+  let best={sum:0,start:0};
+  for(let i=0;i<37;i++){
+    let s=0;
+    for(let j=0;j<3;j++) s+=heat[(i+j)%37];
+    if(s>best.sum) best={sum:s,start:i};
   }
-  document.getElementById('macroSector').innerText="Macro Sector (Top 3): "+topSector.join(", ");
-  
-  // --- Top Number & Neighbor ---
-  let freq={};
-  history.forEach(n=>freq[n]=(freq[n]||0)+1);
-  let topNum=parseInt(Object.keys(freq).reduce((a,b)=>freq[a]>freq[b]?a:b));
-  let idx=wheel.indexOf(topNum);
-  let neighbor=wheel[(idx+1)%37]; // 1 neighbor
-  document.getElementById('topNumber').innerText="Top Number: "+topNum;
-  document.getElementById('neighbor').innerText="Neighbor: "+neighbor;
-  
-  document.getElementById('status').innerText="Prediction ready ✅";
+
+  macroSector=[];
+  for(let i=0;i<3;i++) macroSector.push(wheel[(best.start+i)%37]);
+  document.getElementById('macroSector').innerText = "Macro Sector: "+macroSector.join(", ");
 }
+
+// ===== Predict Next Neighbor =====
+function predictNextNeighbor(){
+  if(lastNumbers.length===0) return;
+  const last = lastNumbers[lastNumbers.length-1];
+  const idx = wheel.indexOf(last);
+  const neighbor = wheel[(idx+1)%37]; 
+  document.getElementById('neighborPred').innerText = "Next Neighbor: "+neighbor;
+}
+
+// ===== Top 5 Numbers =====
+function highlightTopNumbers(){
+  const freq = {};
+  lastNumbers.forEach(n=> freq[n]=(freq[n]||0)+1);
+  const sorted = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,5).map(x=>x[0]);
+  document.getElementById('topNumbers').innerText = "Top Numbers: "+sorted.join(", ");
+
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+  overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+
+  sorted.forEach((n,i)=>{
+    overlayCtx.fillStyle = "rgba(255,255,0,0.6)";
+    overlayCtx.font = "20px Arial";
+    overlayCtx.fillText(n, 20, 30 + i*25);
+  });
+}
+
+// ===== Ball Tracking =====
+function trackBall(){
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+  const data = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  let ball = null;
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2];
+    if(r>200 && g>200 && b>200){ // bright ball detection
+      const idx = i/4;
+      const x = idx % canvas.width;
+      const y = Math.floor(idx / canvas.width);
+      ball = {x,y};
+      break;
+    }
+  }
+
+  if(ball){
+    const cx = canvas.width/2, cy = canvas.height/2;
+    const angle = Math.atan2(ball.y-cy, ball.x-cx);
+    const now = performance.now();
+    if(prevAngle !== null){
+      const dt = (now-prevTime)/1000;
+      ballSpeed = (angle-prevAngle)/dt;
+      document.getElementById('ballSpeed').innerText = "Ball Speed: "+ballSpeed.toFixed(2)+" rad/s";
+    }
+    prevAngle = angle; prevTime = now;
+  }
+  requestAnimationFrame(trackBall);
+}
+trackBall();
 </script>
 
 </body>
