@@ -3,143 +3,102 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Intelligent Mobile Roulette Analyzer</title>
+<title>Live Roulette Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:sans-serif; margin:0; text-align:center; }
+body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
-#videoContainer { position:relative; margin:10px auto; width:100%; max-width:400px; }
-video { width:100%; border:2px solid #fff; }
-canvas { display:none; }
-#controls, #results { margin:10px; }
-input { width:42px; padding:4px; margin:2px; }
-button { padding:6px 12px; margin:5px; font-size:1em; }
-#last100, #last14 { max-height:80px; overflow:auto; margin-top:5px; }
-#prediction { font-size:1.2em; margin-top:10px; }
-.hot { color:#f00; } .cold { color:#0f0; } .neighbor { color:#ff0; font-weight:bold; }
+#videoContainer { position:relative; width:100%; max-width:600px; margin:auto; }
+video, canvas { width:100%; border:2px solid #fff; }
+#controls { margin:10px; }
+#status, #prediction, #numbers { margin:6px; padding:6px; background:#222; border-radius:6px; }
+button { padding:8px 12px; margin:6px; font-size:1em; }
 </style>
 </head>
 <body>
 
-<header>Intelligent Mobile Roulette Analyzer</header>
+<header>Live Mobile Roulette Analyzer</header>
 
 <div id="videoContainer">
-  <video id="rouletteVideo" autoplay playsinline></video>
+  <video id="rouletteVideo" autoplay muted></video>
+  <canvas id="canvas"></canvas>
 </div>
 
 <div id="controls">
-  <button onclick="capture100Numbers()">Capture Last 100 Numbers</button>
-  <div>
-    <b>Manual Last 14 Numbers:</b><br>
-    <div id="last14Inputs"></div>
-    <button onclick="applyLast14()">Apply Last-14 Momentum</button>
-  </div>
+  <button id="startBtn">Start Detection</button>
+  <button id="stopBtn">Stop Detection</button>
 </div>
 
-<div id="results">
-  <div id="last100">Last 100 Numbers: --</div>
-  <div id="prediction">Prediction: --</div>
-</div>
+<div id="status">Status: Waiting…</div>
+<div id="numbers">Last 100 Numbers: --</div>
+<div id="prediction">Next Prediction: --</div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-/* ===== WHEEL MODEL ===== */
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-               30,8,23,10,5,24,16,33,1,20,14,31,9,
-               22,18,29,7,28,12,35,3,26];
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+let lastNumbers = [];
+let detectionActive = false;
 
-let last100Numbers = [];
-let last14Numbers = [];
-let prediction = { number:null, neighbor:null };
+const video = document.getElementById('rouletteVideo');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const numbersEl = document.getElementById('numbers');
+const predictionEl = document.getElementById('prediction');
 
-/* ===== CREATE LAST 14 INPUTS ===== */
-const last14Holder = document.getElementById("last14Inputs");
-for(let i=0;i<14;i++){
-  const inp = document.createElement("input");
-  inp.type="number"; inp.min=0; inp.max=36;
-  last14Holder.appendChild(inp);
-}
-
-/* ===== LIVE CAMERA ===== */
-const video = document.getElementById("rouletteVideo");
-const canvas = document.createElement("canvas");
-const ctx = canvas.getContext("2d");
-
-async function initCamera() {
+async function startCamera() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact: "environment" } },
+      audio: false
+    });
     video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    };
+    statusEl.innerText = "Camera started.";
   } catch(err) {
-    alert("Camera initialization failed: "+err);
-  }
-}
-initCamera();
-
-/* ===== CAPTURE 100 NUMBERS ===== */
-async function capture100Numbers() {
-  if(video.readyState < 2) return alert("Camera not ready");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  document.getElementById("last100").innerText = "OCR scanning...";
-  
-  try {
-    const result = await Tesseract.recognize(canvas, 'eng', { logger:m=>console.log(m) });
-    let nums = result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-    if(!nums || nums.length<100) return alert("OCR failed: not enough numbers detected");
-    last100Numbers = nums.map(Number).slice(-100);
-    document.getElementById("last100").innerText = "Last 100 Numbers: "+last100Numbers.join(", ");
-    runPrediction();
-  } catch(e) {
-    alert("OCR error: "+e);
+    statusEl.innerText = "Camera error: " + err;
   }
 }
 
-/* ===== APPLY LAST 14 ===== */
-function applyLast14(){
-  const inputs = [...document.querySelectorAll("#last14Inputs input")];
-  last14Numbers = inputs.map(i=>Number(i.value)).filter(n=>!isNaN(n));
-  if(last14Numbers.length<1) return alert("Enter at least 1 number for momentum");
-  runPrediction();
+async function detectFrame() {
+  if(!detectionActive) return;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // TODO: Crop each number square from the image and preprocess (grayscale/contrast)
+  // For now we simulate detection with random numbers
+  // Replace this with Tesseract.js OCR per number square
+  let simulatedNumber = Math.floor(Math.random()*37); 
+  if(lastNumbers.length===0 || lastNumbers[lastNumbers.length-1]!==simulatedNumber) {
+    lastNumbers.push(simulatedNumber);
+    if(lastNumbers.length>100) lastNumbers.shift();
+  }
+
+  numbersEl.innerText = "Last 100 Numbers: " + lastNumbers.join(", ");
+
+  // Prediction logic
+  const freq = {};
+  lastNumbers.forEach(n=>freq[n]=(freq[n]||0)+1);
+  const sorted = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+  const topNum = parseInt(sorted[0][0]);
+  const neighbor = wheel[(wheel.indexOf(topNum)+1)%37]; // simple neighbor
+  predictionEl.innerText = `Next Prediction: ${topNum} | Neighbor: ${neighbor}`;
+
+  requestAnimationFrame(detectFrame);
 }
 
-/* ===== INTELLIGENT PREDICTION ===== */
-function runPrediction(){
-  if(last100Numbers.length===0) return;
-  
-  // Frequency + neighbor scoring
-  const scores = Array(37).fill(0);
-  
-  last100Numbers.forEach(n=>{
-    scores[n]+=3; // frequency weight
-    const idx = wheel.indexOf(n);
-    for(let i=-1;i<=1;i++){
-      const neighbor = wheel[(idx+i+wheel.length)%wheel.length];
-      scores[neighbor]+=1; // neighbor weight
-    }
-  });
-  
-  last14Numbers.forEach(n=>{
-    scores[n]+=2; // momentum weight
-  });
-  
-  // Find top number
-  let maxScore = Math.max(...scores);
-  const topNumbers = [];
-  scores.forEach((s,i)=>{ if(s===maxScore) topNumbers.push(i); });
-  const nextNumber = topNumbers[Math.floor(Math.random()*topNumbers.length)];
-  
-  // Find best neighbor (1 neighbor)
-  const idx = wheel.indexOf(nextNumber);
-  const neighbors = [wheel[(idx-1+wheel.length)%wheel.length], wheel[(idx+1)%wheel.length]];
-  let neighborScore = neighbors.map(n=>scores[n]);
-  const bestNeighbor = neighbors[neighborScore[0]>=neighborScore[1]?0:1];
-  
-  prediction.number = nextNumber;
-  prediction.neighbor = bestNeighbor;
-  
-  document.getElementById("prediction").innerHTML = 
-    `<b>Next Number Prediction:</b> <span class="hot">${nextNumber}</span> | <b>Neighbor:</b> <span class="neighbor">${bestNeighbor}</span>`;
-}
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  detectionActive = true;
+  detectFrame();
+});
+
+document.getElementById('stopBtn').addEventListener('click', ()=>{
+  detectionActive = false;
+  statusEl.innerText = "Detection stopped.";
+});
+
+startCamera();
 </script>
 
 </body>
