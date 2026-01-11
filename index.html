@@ -3,190 +3,175 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Roulette Analyzer - Smooth & HD</title>
+<title>Live Roulette Smart Analyzer</title>
 <style>
-body{margin:0;font-family:Arial;background:#000;color:#fff;text-align:center;}
-header{background:#111;padding:10px;font-size:1.3em;}
-#videoContainer{position:relative;width:100%;max-width:600px;margin:auto;}
-canvas{width:100%;height:auto;border:2px solid #fff;}
-.statBox{background:#222;padding:8px;margin:4px;border-radius:5px;}
-#stats{margin-top:10px;font-size:0.9em;}
-.highlight{position:absolute;border-radius:50%;border:2px solid yellow;pointer-events:none;}
+body { margin:0; font-family:sans-serif; background:#000; color:#fff; text-align:center; }
+header { background:#111; padding:12px; font-size:1.4em; }
+#canvasContainer { position: relative; width:100%; max-width:600px; margin:auto; }
+canvas { width:100%; border:2px solid #fff; display:block; }
+#stats { margin-top:10px; font-size:1em; }
+#stats div { margin:4px 0; }
+#controls { margin:10px; }
+button { padding:8px 12px; margin:4px; font-size:1em; }
 </style>
 </head>
 <body>
 
-<header>Mobile Roulette Analyzer HD</header>
+<header>Live Roulette Smart Analyzer</header>
 
-<div id="videoContainer">
-  <video id="cameraVideo" autoplay playsinline></video>
-  <canvas id="overlay"></canvas>
+<div id="canvasContainer">
+<canvas id="overlay"></canvas>
+<video id="video" autoplay muted playsinline style="display:none;"></video>
 </div>
 
 <div id="stats">
-  <div class="statBox" id="ballSpeed">Ball Speed: -- rad/s</div>
-  <div class="statBox" id="lastNumbers">Last Numbers: --</div>
-  <div class="statBox" id="prediction">Next Prediction: --</div>
-  <div class="statBox" id="topSectors">Top 3 Sectors: --</div>
-  <div class="statBox" id="topNeighbors">Top 5 Neighbors: --</div>
+  <div>Last Numbers: <span id="lastNumbers">--</span></div>
+  <div>Ball Speed (rad/s): <span id="ballSpeed">--</span></div>
+  <div>Physics Prediction: <span id="physicsPred">--</span></div>
+  <div>Final Prediction + Neighbor: <span id="finalPred">--</span></div>
+</div>
+
+<div id="controls">
+  <input type="file" accept="image/*" id="screenshot">
+  <button onclick="loadScreenshot()">Load Screenshot (Optional)</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-30,8,23,10,5,24,16,33,1,20,14,31,9,
-22,18,29,7,28,12,35,3,26];
+// --- WHEEL MODEL ---
+const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+               30,8,23,10,5,24,16,33,1,20,14,31,9,
+               22,18,29,7,28,12,35,3,26];
 
-let history=[], lastNumber=-1;
-let prevAngle=null, prevTime=null, currentSpeed=0;
-let topSectors=[], topNeighbors=[];
+let lastNumbers = [];
+let overlay = document.getElementById('overlay');
+let ctx = overlay.getContext('2d');
+let video = document.getElementById('video');
 
-const video=document.getElementById('cameraVideo');
-const canvas=document.getElementById('overlay');
-const ctx=canvas.getContext('2d');
+let prevAngle = null, prevTime = null, ballSpeed = 0;
 
-// Processing offscreen canvas (small resolution for detection)
-const procCanvas=document.createElement('canvas');
-const procCtx=procCanvas.getContext('2d');
-
-// Request back camera at high resolution for crisp display
+// --- CAMERA SETUP ---
 navigator.mediaDevices.getUserMedia({
-  video:{facingMode:"environment"}
-}).then(stream => video.srcObject = stream)
-.catch(e=>alert("Camera access denied or unavailable"));
+  video: { facingMode: "environment", width:640, height:480 }
+}).then(stream => {
+  video.srcObject = stream;
+}).catch(err=>alert("Camera error: "+err));
 
-// Detect wheel center (assume center of video)
-function detectWheel(frameCtx){
-  const w=frameCtx.canvas.width;
-  const h=frameCtx.canvas.height;
-  return {cx:w/2, cy:h/2, radius:Math.min(w,h)/3};
-}
-
-// Detect ball using sampled pixels around wheel ring
-function detectBall(frameCtx,wheelCenter){
-  const w=frameCtx.canvas.width;
-  const h=frameCtx.canvas.height;
-  const img=frameCtx.getImageData(0,0,w,h);
-  let brightest={x:0,y:0,max:0};
-  for(let i=0;i<img.data.length;i+=16){ // sample every 4 pixels
-    const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
-    const brightness=r+g+b;
-    const px=(i/4)%w, py=Math.floor(i/4/w);
-    const dx=px-wheelCenter.cx, dy=py-wheelCenter.cy;
-    const dist=Math.sqrt(dx*dx+dy*dy);
-    if(dist>wheelCenter.radius*0.6 && dist<wheelCenter.radius*1.05 && brightness>brightest.max){
-      brightest.max=brightness; brightest.x=px; brightest.y=py;
+// --- BALL DETECTION ---
+function detectBall(frameCtx){
+  const w = overlay.width;
+  const h = overlay.height;
+  const data = frameCtx.getImageData(0,0,w,h).data;
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i], g=data[i+1], b=data[i+2];
+    if(r>200 && g>200 && b>200){ // bright ball, adjust threshold
+      const x=(i/4)%w;
+      const y=Math.floor(i/4/w);
+      return {x,y};
     }
   }
-  return brightest.max>200?{x:brightest.x,y:brightest.y}:null;
+  return null;
 }
 
-// Track ball motion
-function trackBall(ball,wheelCenter){
-  const now=performance.now();
-  const angle=Math.atan2(ball.y-wheelCenter.cy, ball.x-wheelCenter.cx);
-  if(prevAngle!==null){
-    const dt=(now-prevTime)/1000;
-    currentSpeed=(angle-prevAngle)/dt;
+// --- BALL TRACKING ---
+function trackBall(ball){
+  const cx = overlay.width/2, cy = overlay.height/2;
+  const angle = Math.atan2(ball.y-cy, ball.x-cx);
+  const now = performance.now();
+  if(prevAngle !== null){
+    const dt = (now-prevTime)/1000;
+    ballSpeed = (angle-prevAngle)/dt;
   }
-  prevAngle=angle; prevTime=now;
+  prevAngle = angle;
+  prevTime = now;
 }
 
-// OCR region
-function getNumberRegion(wheelCenter){
-  const size=wheelCenter.radius*0.5;
-  return {x:wheelCenter.cx-size, y:wheelCenter.cy-size, w:size*2, h:size};
+// --- PHYSICS PREDICTION ---
+function predictLandingFromBall(ball){
+  if(!ball) return null;
+  const cx = overlay.width/2, cy = overlay.height/2;
+  const angle = Math.atan2(ball.y-cy, ball.x-cx);
+  const decel = 0.05;
+  const segmentsLeft = Math.round(ballSpeed*ballSpeed/(2*decel));
+  // Map angle to closest wheel segment
+  const segmentSize = 2*Math.PI / wheel.length;
+  let currentIndex = Math.floor((angle + Math.PI) / segmentSize) % wheel.length;
+  if(currentIndex<0) currentIndex+=wheel.length;
+  return wheel[(currentIndex+segmentsLeft+wheel.length)%wheel.length];
 }
 
-// OCR every 3s
-let lastOCR=0;
-const OCR_INTERVAL=3000;
-async function detectNumber(region){
-  const now=performance.now();
-  if(now-lastOCR<OCR_INTERVAL) return;
-  lastOCR=now;
-  procCanvas.width=region.w; procCanvas.height=region.h;
-  procCtx.drawImage(canvas,region.x,region.y,region.w,region.h,0,0,region.w,region.h);
+// --- COMBINE STATISTICS + PHYSICS ---
+function combinePrediction(physicsPred){
+  if(lastNumbers.length===0) return;
+  const counts = {};
+  lastNumbers.forEach(n => counts[n] = (counts[n]||0)+1);
+  let topNumber = parseInt(Object.keys(counts).reduce((a,b)=>counts[a]>counts[b]?a:b));
+
+  // Choose physics prediction if it aligns with hot numbers
+  let final = physicsPred && lastNumbers.includes(physicsPred)? physicsPred : topNumber;
+  const idx = wheel.indexOf(final);
+  const neighbor = wheel[(idx+1)%wheel.length];
+
+  document.getElementById('physicsPred').innerText = physicsPred||"--";
+  document.getElementById('finalPred').innerText = final+" | Neighbor: "+neighbor;
+}
+
+// --- OCR FOR CURRENT NUMBER ---
+async function readNumberFromVideo(){
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = overlay.width;
+  tempCanvas.height = overlay.height;
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.drawImage(video,0,0,tempCanvas.width,tempCanvas.height);
+
+  // Adjust this region to match your camera view
+  const regionX = tempCanvas.width-100;
+  const regionY = 10;
+  const regionW = 80;
+  const regionH = 50;
+  const imageData = tempCtx.getImageData(regionX, regionY, regionW, regionH);
+
   try{
-    const result=await Tesseract.recognize(procCanvas,'eng');
-    const num=parseInt(result.data.text.replace(/\D/g,''));
-    if(!isNaN(num)&&num>=0&&num<=36 && num!==lastNumber){
-      lastNumber=num;
-      history.push(num);
-      if(history.length>100) history.shift();
-      updatePredictions();
+    const res = await Tesseract.recognize(imageData, 'eng');
+    let num = parseInt(res.data.text.replace(/\D/g,''));
+    if(!isNaN(num) && num>=0 && num<=36){
+      if(lastNumbers[lastNumbers.length-1] !== num){
+        lastNumbers.push(num);
+        if(lastNumbers.length>100) lastNumbers.shift();
+        document.getElementById('lastNumbers').innerText = lastNumbers.join(", ");
+      }
     }
-  }catch(e){console.log("OCR failed",e);}
+  }catch(e){}
 }
 
-// Prediction logic
-function updatePredictions(){
-  if(history.length===0) return;
-  const counts=Array(37).fill(0);
-  history.forEach(n=>counts[n]+=1);
-  const sorted=counts.map((v,i)=>({num:i,count:v})).sort((a,b)=>b.count-a.count);
-  topSectors=sorted.slice(0,3).map(x=>x.num);
+// --- MAIN LOOP ---
+function loop(){
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+  ctx.drawImage(video,0,0,overlay.width,overlay.height);
 
-  const neighborSet=new Set();
-  for(let n of topSectors){
-    const idx=wheel.indexOf(n);
-    [-2,-1,1,2].forEach(off=>{
-      const x=wheel[(idx+off+37)%37];
-      if(neighborSet.size<5 && !topSectors.includes(x)) neighborSet.add(x);
-    });
-  }
-  topNeighbors=Array.from(neighborSet);
+  const ball = detectBall(ctx);
+  if(ball) trackBall(ball);
 
-  document.getElementById('ballSpeed').innerText="Ball Speed: "+currentSpeed.toFixed(2)+" rad/s";
-  document.getElementById('lastNumbers').innerText="Last Numbers: "+history.slice(-10).join(", ");
-  document.getElementById('prediction').innerText="Next Prediction: "+sorted[0].num;
-  document.getElementById('topSectors').innerText="Top 3 Sectors: "+topSectors.join(", ");
-  document.getElementById('topNeighbors').innerText="Top 5 Neighbors: "+topNeighbors.join(", ");
+  const physicsPred = predictLandingFromBall(ball);
+  combinePrediction(physicsPred);
 
-  drawOverlay();
+  readNumberFromVideo(); // OCR
+  document.getElementById('ballSpeed').innerText = ballSpeed.toFixed(2);
+
+  requestAnimationFrame(loop);
 }
 
-// Draw overlay highlights
-function drawOverlay(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const wheelCenter=detectWheel(ctx);
-  // Draw sectors
-  ctx.strokeStyle='yellow'; ctx.lineWidth=3;
-  topSectors.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    const angle=idx*(2*Math.PI/37);
-    const x=wheelCenter.cx+Math.cos(angle)*wheelCenter.radius;
-    const y=wheelCenter.cy+Math.sin(angle)*wheelCenter.radius;
-    ctx.beginPath(); ctx.arc(x,y,15,0,2*Math.PI); ctx.stroke();
-  });
-  // Draw neighbors
-  ctx.strokeStyle='orange'; ctx.lineWidth=2;
-  topNeighbors.forEach(n=>{
-    const idx=wheel.indexOf(n);
-    const angle=idx*(2*Math.PI/37);
-    const x=wheelCenter.cx+Math.cos(angle)*wheelCenter.radius;
-    const y=wheelCenter.cy+Math.sin(angle)*wheelCenter.radius;
-    ctx.beginPath(); ctx.arc(x,y,12,0,2*Math.PI); ctx.stroke();
-  });
+video.onloadedmetadata = () => loop();
+
+// --- OPTIONAL: LOAD SCREENSHOT ---
+function loadScreenshot(){
+  const file = document.getElementById('screenshot').files[0];
+  if(!file) return alert("Select a file");
+  const img = new Image();
+  img.onload = ()=>ctx.drawImage(img,0,0,overlay.width,overlay.height);
+  img.src = URL.createObjectURL(file);
 }
-
-// Main loop
-async function analyzeFrame(){
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-
-  const wheelCenter=detectWheel(ctx);
-  const ball=detectBall(ctx,wheelCenter);
-  if(ball) trackBall(ball,wheelCenter);
-
-  const region=getNumberRegion(wheelCenter);
-  await detectNumber(region);
-
-  requestAnimationFrame(analyzeFrame);
-}
-
-video.onloadedmetadata=()=>analyzeFrame();
 </script>
 </body>
 </html>
