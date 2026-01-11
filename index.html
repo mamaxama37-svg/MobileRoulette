@@ -3,39 +3,70 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Professional Roulette Neighbor Analyzer</title>
+<title>Professional Roulette Cluster Analyzer</title>
 
 <style>
-body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
-header { background:#111; padding:12px; font-size:1.2em; }
-#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-textarea { width:95%; height:120px; background:#000; color:#0f0; }
-button { padding:10px 14px; font-size:1em; margin:8px; }
-.result { font-size:1.05em; margin-top:6px; }
-.hot { color:#ff5555; }
-.good { color:#ffaa00; }
-.ok { color:#66ccff; }
+body {
+  background:#000;
+  color:#fff;
+  font-family:Arial, sans-serif;
+  margin:0;
+  text-align:center;
+}
+header {
+  background:#111;
+  padding:12px;
+  font-size:1.3em;
+}
+#box {
+  background:#1a1a1a;
+  margin:10px;
+  padding:12px;
+  border-radius:6px;
+}
+textarea {
+  width:95%;
+  height:120px;
+  background:#000;
+  color:#0f0;
+  border:1px solid #444;
+  padding:8px;
+}
+button {
+  padding:10px 16px;
+  font-size:1em;
+  margin-top:8px;
+}
+.result {
+  margin-top:10px;
+  font-size:1.05em;
+}
+.highlight {
+  color:#ffd700;
+  font-weight:bold;
+}
 </style>
 </head>
 
 <body>
 
-<header>Professional Roulette Neighbor Analyzer</header>
+<header>Professional Roulette Cluster Analyzer</header>
 
 <div id="box">
-<b>1️⃣ Paste LAST 100 Numbers (comma or space separated)</b><br>
-<textarea id="numbers"></textarea><br>
+<b>1️⃣ Paste LAST 100 Numbers</b><br>
+<textarea id="inputNums" placeholder="Example: 23,10,8,30,5,23,10,..."></textarea><br>
 <button onclick="analyze()">ANALYZE</button>
 </div>
 
 <div id="box">
+<div id="status">Waiting for input…</div>
 <div class="result" id="anchors"></div>
-<div class="result" id="neighbors"></div>
-<div class="result" id="probabilities"></div>
+<div class="result" id="finalBet"></div>
+<div class="result" id="prob"></div>
 </div>
 
 <script>
-/* ===== EUROPEAN WHEEL ===== */
+/* EUROPEAN WHEEL ORDER */
 const wheel = [
 0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
@@ -43,62 +74,59 @@ const wheel = [
 ];
 
 function analyze(){
-  const input = document.getElementById("numbers").value;
-  let nums = input.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-  if(!nums || nums.length < 30){
-    alert("Paste at least 30 numbers (ideally 100)");
+  const raw = document.getElementById("inputNums").value;
+  let nums = raw.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums || nums.length < 40){
+    alert("Please paste at least 40–100 numbers");
     return;
   }
 
   nums = nums.map(Number).slice(-100);
 
-  // ===== HEAT MAP WITH NEIGHBOR INFLUENCE =====
-  let heat = Array(37).fill(0);
+  const heat = Array(37).fill(0);
+
   nums.forEach(n=>{
-    const idx = wheel.indexOf(n);
-    for(let i=-2;i<=2;i++){
-      const w = Math.abs(i)===0 ? 3 : Math.abs(i)===1 ? 2 : 1;
-      heat[(idx+i+37)%37] += w;
+    const i = wheel.indexOf(n);
+    if(i === -1) return;
+
+    heat[i] += 1.0;
+    heat[(i+1)%37] += 0.75;
+    heat[(i+36)%37] += 0.75;
+    heat[(i+2)%37] += 0.5;
+    heat[(i+35)%37] += 0.5;
+  });
+
+  // find top 3 anchor numbers
+  let ranked = heat
+    .map((v,i)=>({num:wheel[i], score:v}))
+    .sort((a,b)=>b.score-a.score);
+
+  const anchors = ranked.slice(0,3).map(o=>o.num);
+
+  // build 5-number neighbor cluster
+  let finalSet = new Set();
+  anchors.forEach(a=>{
+    const i = wheel.indexOf(a);
+    for(let d=-2; d<=2; d++){
+      finalSet.add(wheel[(i+d+37)%37]);
     }
   });
 
-  // ===== TOP 3 ANCHORS =====
-  let anchors = [...heat]
-    .map((v,i)=>({num:wheel[i],score:v}))
-    .sort((a,b)=>b.score-a.score)
-    .slice(0,3);
+  const finalNums = Array.from(finalSet).slice(0,5);
+
+  document.getElementById("status").innerHTML =
+    "Analysis complete ("+nums.length+" spins)";
 
   document.getElementById("anchors").innerHTML =
-    "<b>🎯 Top 3 Anchor Numbers:</b><br>" +
-    anchors.map(a=>a.num+" ("+a.score+")").join(", ");
+    "🎯 <span class='highlight'>Top 3 Anchors:</span><br>" +
+    anchors.join(", ");
 
-  // ===== BUILD 5-NEIGHBOR SET =====
-  let neighborSet = new Map();
-  anchors.forEach(a=>{
-    const idx = wheel.indexOf(a.num);
-    for(let i=-2;i<=2;i++){
-      const n = wheel[(idx+i+37)%37];
-      const w = Math.abs(i)===0 ? 1.0 : Math.abs(i)===1 ? 0.7 : 0.4;
-      neighborSet.set(n, (neighborSet.get(n)||0) + w*a.score);
-    }
-  });
+  document.getElementById("finalBet").innerHTML =
+    "💰 <span class='highlight'>FINAL BET (5 numbers):</span><br>" +
+    finalNums.join(", ");
 
-  let neighbors = [...neighborSet.entries()]
-    .sort((a,b)=>b[1]-a[1])
-    .slice(0,5);
-
-  document.getElementById("neighbors").innerHTML =
-    "<b>🎯 FINAL 5-NUMBER BET (±2 neighbors):</b><br>" +
-    neighbors.map(n=>"<span class='hot'>"+n[0]+"</span>").join(", ");
-
-  // ===== PROBABILITIES =====
-  const total = neighbors.reduce((s,n)=>s+n[1],0);
-  document.getElementById("probabilities").innerHTML =
-    "<b>📊 Probabilities:</b><br>" +
-    neighbors.map(n=>{
-      const p = ((n[1]/total)*100).toFixed(1);
-      return n[0]+": "+p+"%";
-    }).join("<br>");
+  document.getElementById("prob").innerHTML =
+    "📊 Estimated cluster dominance — bet small & stop after hit";
 }
 </script>
 
