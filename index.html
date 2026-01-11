@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart Live Roulette Analyzer</title>
+<title>Live Mobile Roulette Analyzer</title>
 <style>
 body { background:#000; color:#fff; font-family:sans-serif; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
@@ -18,7 +18,7 @@ canvas { position:absolute; top:0; left:0; width:100%; height:100%; }
 </head>
 <body>
 
-<header>Smart Live Roulette Analyzer</header>
+<header>Live Mobile Roulette Analyzer</header>
 
 <div id="videoContainer">
   <video id="rouletteVideo" autoplay playsinline></video>
@@ -51,13 +51,15 @@ async function initCamera(){
 }
 initCamera();
 
-/* ===== OCR & LIVE DETECTION ===== */
+/* ===== LIVE OCR & HIGHLIGHT ===== */
 async function analyzeFrame(){
   if(video.readyState<2){ requestAnimationFrame(analyzeFrame); return; }
 
+  // Draw video frame to overlay canvas
   ctx.clearRect(0,0,overlay.width,overlay.height);
   ctx.drawImage(video,0,0,overlay.width,overlay.height);
 
+  // Region of interest for OCR (adjust for your table)
   const x=0, y=0, w=overlay.width, h=overlay.height;
   const imageData=ctx.getImageData(x,y,w,h);
 
@@ -79,7 +81,7 @@ async function analyzeFrame(){
         }
       });
 
-      runSmartPrediction();
+      runPrediction();
     }
   }catch(e){ console.log("OCR error:",e); }
 
@@ -87,31 +89,23 @@ async function analyzeFrame(){
 }
 analyzeFrame();
 
-/* ===== SMART MATHEMATICAL PREDICTION ===== */
-function runSmartPrediction(){
+/* ===== INTELLIGENT PREDICTION ===== */
+function runPrediction(){
   if(last100Numbers.length===0) return;
 
-  // Frequency calculation
-  const freq = Array(37).fill(0);
+  const scores=Array(37).fill(0);
   last100Numbers.forEach(n=>{
-    freq[n]++;
-  });
-
-  // Momentum weight: last 10 numbers
-  const last10 = last100Numbers.slice(-10);
-  last10.forEach(n=>{ freq[n]+=2; });
-
-  // Neighbor boost
-  const scores = Array(37).fill(0);
-  wheel.forEach((num,idx)=>{
-    const neighbors = [wheel[(idx-1+wheel.length)%37], wheel[(idx+1)%wheel.length]];
-    scores[num] = freq[num] + neighbors.reduce((sum,n)=>sum+freq[n]*0.5,0);
+    scores[n]+=3;
+    const idx=wheel.indexOf(n);
+    for(let i=-1;i<=1;i++){
+      const neighbor=wheel[(idx+i+wheel.length)%37];
+      scores[neighbor]+=1;
+    }
   });
 
   const maxScore=Math.max(...scores);
   const topNumbers=[];
   scores.forEach((s,i)=>{ if(s===maxScore) topNumbers.push(i); });
-
   const nextNumber=topNumbers[Math.floor(Math.random()*topNumbers.length)];
 
   // Best neighbor
