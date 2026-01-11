@@ -3,23 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Optimized Mobile Live Roulette Analyzer</title>
+<title>Mobile Roulette Analyzer - Optimized</title>
 <style>
 body {margin:0; font-family:Arial; background:#000; color:#fff; text-align:center;}
 header{background:#111;padding:10px;font-size:1.3em;}
 #videoContainer{position:relative;width:100%;max-width:600px;margin:auto;}
-video{width:100%;border:2px solid #fff;}
-canvas{position:absolute;top:0;left:0;}
+canvas{width:100%;height:auto; border:2px solid #fff;}
 .statBox{background:#222;padding:8px;margin:4px;border-radius:5px;}
 #stats{margin-top:10px;font-size:0.9em;}
 </style>
 </head>
 <body>
 
-<header>Optimized Mobile Live Roulette Analyzer</header>
+<header>Mobile Roulette Analyzer</header>
 
 <div id="videoContainer">
-  <video id="cameraVideo" autoplay playsinline></video>
+  <video id="cameraVideo" autoplay playsinline style="display:none;"></video>
   <canvas id="overlay"></canvas>
 </div>
 
@@ -47,13 +46,13 @@ const video=document.getElementById('cameraVideo');
 const canvas=document.getElementById('overlay');
 const ctx=canvas.getContext('2d');
 
-/* ===== Back Camera with Reduced Resolution ===== */
+/* ===== Back Camera ===== */
 navigator.mediaDevices.getUserMedia({
   video:{facingMode:"environment", width:640, height:480}
 }).then(stream => video.srcObject = stream)
-.catch(e=>alert("Camera access denied or not available"));
+.catch(e=>alert("Camera access denied or unavailable"));
 
-/* ===== Automatic Wheel Detection ===== */
+/* ===== Wheel Center Detection ===== */
 function detectWheel(frameCtx){
   const w=frameCtx.canvas.width;
   const h=frameCtx.canvas.height;
@@ -67,7 +66,7 @@ function detectBall(frameCtx, wheelCenter){
   const h=frameCtx.canvas.height;
   const img=frameCtx.getImageData(0,0,w,h);
   let brightest={x:0,y:0,max:0};
-  for(let i=0;i<img.data.length;i+=16){ // sample every 4 pixels
+  for(let i=0;i<img.data.length;i+=16){
     const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
     const brightness=r+g+b;
     const px=(i/4)%w, py=Math.floor(i/4/w);
@@ -91,7 +90,7 @@ function trackBall(ball,wheelCenter){
   prevAngle=angle; prevTime=now;
 }
 
-/* ===== Automatic Number Area Detection ===== */
+/* ===== Number OCR Area ===== */
 function getNumberRegion(wheelCenter){
   const size=wheelCenter.radius*0.5;
   return {x:wheelCenter.cx-size, y:wheelCenter.cy-size, w:size*2, h:size};
@@ -103,7 +102,7 @@ const OCR_INTERVAL=1000;
 
 async function detectNumber(region){
   const now=performance.now();
-  if(now-lastOCR<OCR_INTERVAL) return; // limit OCR
+  if(now-lastOCR<OCR_INTERVAL) return;
   lastOCR=now;
   const numberRegion=ctx.getImageData(region.x,region.y,region.w,region.h);
   try{
@@ -124,6 +123,7 @@ function updatePredictions(){
   const counts=Array(37).fill(0);
   history.forEach(n=>counts[n]+=1);
   const sorted=counts.map((v,i)=>({num:i,count:v})).sort((a,b)=>b.count-a.count);
+  
   topSectors=sorted.slice(0,3).map(x=>x.num);
   const neighborSet=new Set();
   for(let n of topSectors){
@@ -151,7 +151,7 @@ async function analyzeFrame(){
   const wheelCenter=detectWheel(ctx);
   const ball=detectBall(ctx,wheelCenter);
   if(ball) trackBall(ball,wheelCenter);
-
+  
   const region=getNumberRegion(wheelCenter);
   await detectNumber(region);
 
