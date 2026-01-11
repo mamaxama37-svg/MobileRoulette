@@ -5,124 +5,100 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Live Roulette Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:sans-serif; margin:0; text-align:center; }
+body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
 header { background:#111; padding:12px; font-size:1.3em; }
-#videoContainer { position:relative; margin:10px auto; max-width:600px; }
-video { width:100%; border:2px solid #fff; }
-canvas { display:none; }
-#stats { margin-top:10px; }
-.statBox { background:#222; padding:8px; margin:4px; border-radius:6px; }
+#videoContainer { position:relative; width:100%; max-width:600px; margin:auto; }
+video, canvas { width:100%; border:2px solid #fff; }
+#controls { margin:10px; }
+#status, #prediction, #numbers { margin:6px; padding:6px; background:#222; border-radius:6px; }
 button { padding:8px 12px; margin:6px; font-size:1em; }
 </style>
 </head>
 <body>
 
-<header>Live Roulette Analyzer</header>
+<header>Live Mobile Roulette Analyzer</header>
 
 <div id="videoContainer">
-  <video id="cameraFeed" autoplay playsinline></video>
-  <canvas id="processingCanvas"></canvas>
+  <video id="rouletteVideo" autoplay muted></video>
+  <canvas id="canvas"></canvas>
 </div>
 
 <div id="controls">
   <button id="startBtn">Start Detection</button>
+  <button id="stopBtn">Stop Detection</button>
 </div>
 
-<div id="stats">
-  <div class="statBox" id="lastNumbers">Last 100 Numbers: --</div>
-  <div class="statBox" id="macroSector">Macro Sector: --</div>
-  <div class="statBox" id="prediction">Next Number: -- | Neighbor: --</div>
-  <div class="statBox" id="probabilities">Probabilities: --</div>
-</div>
+<div id="status">Status: Waiting…</div>
+<div id="numbers">Last 100 Numbers: --</div>
+<div id="prediction">Next Prediction: --</div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
 const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 let lastNumbers = [];
-let macroSector = [];
-let currentSpeed = 0;
+let detectionActive = false;
 
-const video = document.getElementById('cameraFeed');
-const canvas = document.getElementById('processingCanvas');
+const video = document.getElementById('rouletteVideo');
+const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-let prevAngle = null, prevTime = null;
+const statusEl = document.getElementById('status');
+const numbersEl = document.getElementById('numbers');
+const predictionEl = document.getElementById('prediction');
 
-// ------------------- Start Detection -------------------
-document.getElementById('startBtn').addEventListener('click', async () => {
+async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { exact: "environment" } }, 
+      video: { facingMode: { exact: "environment" } },
       audio: false
     });
     video.srcObject = stream;
-    await video.play();
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    detectLoop();
+    video.onloadedmetadata = () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    };
+    statusEl.innerText = "Camera started.";
   } catch(err) {
-    console.error("Camera start failed:", err);
-    alert("Camera access failed: " + err.message);
+    statusEl.innerText = "Camera error: " + err;
   }
+}
+
+async function detectFrame() {
+  if(!detectionActive) return;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // TODO: Crop each number square from the image and preprocess (grayscale/contrast)
+  // For now we simulate detection with random numbers
+  // Replace this with Tesseract.js OCR per number square
+  let simulatedNumber = Math.floor(Math.random()*37); 
+  if(lastNumbers.length===0 || lastNumbers[lastNumbers.length-1]!==simulatedNumber) {
+    lastNumbers.push(simulatedNumber);
+    if(lastNumbers.length>100) lastNumbers.shift();
+  }
+
+  numbersEl.innerText = "Last 100 Numbers: " + lastNumbers.join(", ");
+
+  // Prediction logic
+  const freq = {};
+  lastNumbers.forEach(n=>freq[n]=(freq[n]||0)+1);
+  const sorted = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+  const topNum = parseInt(sorted[0][0]);
+  const neighbor = wheel[(wheel.indexOf(topNum)+1)%37]; // simple neighbor
+  predictionEl.innerText = `Next Prediction: ${topNum} | Neighbor: ${neighbor}`;
+
+  requestAnimationFrame(detectFrame);
+}
+
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  detectionActive = true;
+  detectFrame();
 });
 
-// ------------------- Main Detection Loop -------------------
-function detectLoop(){
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  detectNumbersFromFrame(ctx).then(updateUI);
-  const ball = detectBall(ctx);
-  if(ball) trackBallMotion(ball);
-  requestAnimationFrame(detectLoop);
-}
+document.getElementById('stopBtn').addEventListener('click', ()=>{
+  detectionActive = false;
+  statusEl.innerText = "Detection stopped.";
+});
 
-// ------------------- MOCK OCR -------------------
-async function detectNumbersFromFrame(ctx){
-  // Placeholder: replace with real detection logic
-  return lastNumbers;
-}
-
-// ------------------- Ball Detection -------------------
-function detectBall(ctx){
-  // Placeholder: detect bright ball here
-  return {x:canvas.width/2, y:canvas.height/2};
-}
-
-function trackBallMotion(ball){
-  const centerX = canvas.width/2, centerY = canvas.height/2;
-  const now = performance.now();
-  const angle = Math.atan2(ball.y-centerY, ball.x-centerX);
-  if(prevAngle!==null){
-    const dt = (now-prevTime)/1000;
-    currentSpeed = (angle-prevAngle)/dt;
-  }
-  prevAngle = angle;
-  prevTime = now;
-}
-
-// ------------------- Prediction Engine -------------------
-function predictNextNumber(){
-  if(lastNumbers.length<5) return {number:'--', neighbor:'--', prob:'--'};
-  const count = {};
-  lastNumbers.forEach(n => count[n] = (count[n]||0)+1);
-  const sorted = Object.entries(count).sort((a,b)=>b[1]-a[1]);
-  const number = parseInt(sorted[0][0]);
-  const neighborIndex = (wheel.indexOf(number)+1)%37;
-  const neighbor = wheel[neighborIndex];
-  const prob = ((sorted[0][1]/lastNumbers.length)*100).toFixed(1) + '%';
-  return {number, neighbor, prob};
-}
-
-// ------------------- UI Update -------------------
-function updateUI(nums){
-  lastNumbers = nums.slice(-100);
-  document.getElementById('lastNumbers').innerText = "Last 100 Numbers: "+lastNumbers.join(',');
-  const counts = {};
-  lastNumbers.forEach(n=>counts[n]=(counts[n]||0)+1);
-  macroSector = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
-  document.getElementById('macroSector').innerText = "Macro Sector (Top 3): "+macroSector.join(',');
-  const pred = predictNextNumber();
-  document.getElementById('prediction').innerText = "Next Number: "+pred.number+" | Neighbor: "+pred.neighbor;
-  document.getElementById('probabilities').innerText = "Probability: "+pred.prob;
-}
+startCamera();
 </script>
 
 </body>
