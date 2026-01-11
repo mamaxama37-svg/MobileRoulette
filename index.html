@@ -3,175 +3,148 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Roulette Smart Analyzer</title>
+<title>Professional Roulette Smart Analyzer</title>
+
 <style>
-body { margin:0; font-family:sans-serif; background:#000; color:#fff; text-align:center; }
-header { background:#111; padding:12px; font-size:1.4em; }
-#canvasContainer { position: relative; width:100%; max-width:600px; margin:auto; }
-canvas { width:100%; border:2px solid #fff; display:block; }
-#stats { margin-top:10px; font-size:1em; }
-#stats div { margin:4px 0; }
-#controls { margin:10px; }
-button { padding:8px 12px; margin:4px; font-size:1em; }
+body { background:#000; color:#fff; font-family:Arial, sans-serif; margin:0; text-align:center; }
+header { background:#111; padding:12px; font-size:1.2em; }
+#box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
+textarea { width:95%; height:120px; background:#000; color:#0f0; }
+button { padding:10px 14px; font-size:1em; margin:8px; }
+.result { font-size:1.05em; margin-top:6px; }
+.hot { color:#ff5555; font-weight:bold; }
+.good { color:#ffaa00; }
+.ok { color:#66ccff; }
 </style>
 </head>
+
 <body>
 
-<header>Live Roulette Smart Analyzer</header>
+<header>Professional Roulette Smart Analyzer</header>
 
-<div id="canvasContainer">
-<canvas id="overlay"></canvas>
-<video id="video" autoplay muted playsinline style="display:none;"></video>
+<div id="box">
+<b>1️⃣ Paste LAST 100 Numbers (comma or space separated)</b><br>
+<textarea id="numbers"></textarea><br>
+<button onclick="analyze()">ANALYZE</button>
 </div>
 
-<div id="stats">
-  <div>Last Numbers: <span id="lastNumbers">--</span></div>
-  <div>Ball Speed (rad/s): <span id="ballSpeed">--</span></div>
-  <div>Physics Prediction: <span id="physicsPred">--</span></div>
-  <div>Final Prediction + Neighbor: <span id="finalPred">--</span></div>
+<div id="box">
+<button onclick="exportHistory()">💾 Export History</button>
+<button onclick="importHistory()">📂 Import History</button>
+<input type="file" id="importFile" style="display:none" onchange="loadFile(event)">
 </div>
 
-<div id="controls">
-  <input type="file" accept="image/*" id="screenshot">
-  <button onclick="loadScreenshot()">Load Screenshot (Optional)</button>
+<div id="box">
+<div class="result" id="anchors"></div>
+<div class="result" id="neighbors"></div>
+<div class="result" id="probabilities"></div>
+<div class="result" id="confidence"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
-// --- WHEEL MODEL ---
-const wheel = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
-               30,8,23,10,5,24,16,33,1,20,14,31,9,
-               22,18,29,7,28,12,35,3,26];
+const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
+30,8,23,10,5,24,16,33,1,20,14,31,9,
+22,18,29,7,28,12,35,3,26];
 
-let lastNumbers = [];
-let overlay = document.getElementById('overlay');
-let ctx = overlay.getContext('2d');
-let video = document.getElementById('video');
+let sessionHistory = [];
 
-let prevAngle = null, prevTime = null, ballSpeed = 0;
-
-// --- CAMERA SETUP ---
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: "environment", width:640, height:480 }
-}).then(stream => {
-  video.srcObject = stream;
-}).catch(err=>alert("Camera error: "+err));
-
-// --- BALL DETECTION ---
-function detectBall(frameCtx){
-  const w = overlay.width;
-  const h = overlay.height;
-  const data = frameCtx.getImageData(0,0,w,h).data;
-  for(let i=0;i<data.length;i+=4){
-    const r=data[i], g=data[i+1], b=data[i+2];
-    if(r>200 && g>200 && b>200){ // bright ball, adjust threshold
-      const x=(i/4)%w;
-      const y=Math.floor(i/4/w);
-      return {x,y};
-    }
+function analyze(){
+  const input = document.getElementById("numbers").value;
+  let nums = input.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+  if(!nums || nums.length < 30){
+    alert("Paste at least 30 numbers (ideally 100)");
+    return;
   }
-  return null;
-}
+  nums = nums.map(Number).slice(-100);
 
-// --- BALL TRACKING ---
-function trackBall(ball){
-  const cx = overlay.width/2, cy = overlay.height/2;
-  const angle = Math.atan2(ball.y-cy, ball.x-cx);
-  const now = performance.now();
-  if(prevAngle !== null){
-    const dt = (now-prevTime)/1000;
-    ballSpeed = (angle-prevAngle)/dt;
-  }
-  prevAngle = angle;
-  prevTime = now;
-}
+  // ===== SESSION MEMORY DECAY =====
+  sessionHistory = sessionHistory.concat(nums);
+  if(sessionHistory.length>200) sessionHistory = sessionHistory.slice(-200);
+  const history = sessionHistory.slice(-100);
 
-// --- PHYSICS PREDICTION ---
-function predictLandingFromBall(ball){
-  if(!ball) return null;
-  const cx = overlay.width/2, cy = overlay.height/2;
-  const angle = Math.atan2(ball.y-cy, ball.x-cx);
-  const decel = 0.05;
-  const segmentsLeft = Math.round(ballSpeed*ballSpeed/(2*decel));
-  // Map angle to closest wheel segment
-  const segmentSize = 2*Math.PI / wheel.length;
-  let currentIndex = Math.floor((angle + Math.PI) / segmentSize) % wheel.length;
-  if(currentIndex<0) currentIndex+=wheel.length;
-  return wheel[(currentIndex+segmentsLeft+wheel.length)%wheel.length];
-}
-
-// --- COMBINE STATISTICS + PHYSICS ---
-function combinePrediction(physicsPred){
-  if(lastNumbers.length===0) return;
-  const counts = {};
-  lastNumbers.forEach(n => counts[n] = (counts[n]||0)+1);
-  let topNumber = parseInt(Object.keys(counts).reduce((a,b)=>counts[a]>counts[b]?a:b));
-
-  // Choose physics prediction if it aligns with hot numbers
-  let final = physicsPred && lastNumbers.includes(physicsPred)? physicsPred : topNumber;
-  const idx = wheel.indexOf(final);
-  const neighbor = wheel[(idx+1)%wheel.length];
-
-  document.getElementById('physicsPred').innerText = physicsPred||"--";
-  document.getElementById('finalPred').innerText = final+" | Neighbor: "+neighbor;
-}
-
-// --- OCR FOR CURRENT NUMBER ---
-async function readNumberFromVideo(){
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = overlay.width;
-  tempCanvas.height = overlay.height;
-  const tempCtx = tempCanvas.getContext('2d');
-  tempCtx.drawImage(video,0,0,tempCanvas.width,tempCanvas.height);
-
-  // Adjust this region to match your camera view
-  const regionX = tempCanvas.width-100;
-  const regionY = 10;
-  const regionW = 80;
-  const regionH = 50;
-  const imageData = tempCtx.getImageData(regionX, regionY, regionW, regionH);
-
-  try{
-    const res = await Tesseract.recognize(imageData, 'eng');
-    let num = parseInt(res.data.text.replace(/\D/g,''));
-    if(!isNaN(num) && num>=0 && num<=36){
-      if(lastNumbers[lastNumbers.length-1] !== num){
-        lastNumbers.push(num);
-        if(lastNumbers.length>100) lastNumbers.shift();
-        document.getElementById('lastNumbers').innerText = lastNumbers.join(", ");
-      }
+  // ===== HEAT MAP WITH NEIGHBOR INFLUENCE =====
+  let heat = Array(37).fill(0);
+  history.forEach((n,idx)=>{
+    const idxWheel = wheel.indexOf(n);
+    for(let i=-2;i<=2;i++){
+      const w = Math.abs(i)===0 ? 3 : Math.abs(i)===1 ? 2 : 1;
+      // older spins decay
+      const decay = Math.pow(0.97, history.length-idx);
+      heat[(idxWheel+i+37)%37] += w*decay;
     }
-  }catch(e){}
+  });
+
+  // ===== TOP 3 ULTRA-AGGRESSIVE ANCHORS =====
+  let anchors = [...heat]
+    .map((v,i)=>({num:wheel[i],score:v}))
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,3);
+
+  document.getElementById("anchors").innerHTML =
+    "<b>🎯 Top 3 Anchor Numbers:</b><br>" +
+    anchors.map(a=>a.num+" ("+a.score.toFixed(1)+")").join(", ");
+
+  // ===== 5-NEIGHBOR SET =====
+  let neighborSet = new Map();
+  anchors.forEach(a=>{
+    const idx = wheel.indexOf(a.num);
+    for(let i=-2;i<=2;i++){
+      const n = wheel[(idx+i+37)%37];
+      const w = Math.abs(i)===0 ? 1.0 : Math.abs(i)===1 ? 0.7 : 0.4;
+      neighborSet.set(n, (neighborSet.get(n)||0) + w*a.score);
+    }
+  });
+
+  let neighbors = [...neighborSet.entries()]
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0,5);
+
+  document.getElementById("neighbors").innerHTML =
+    "<b>🎯 FINAL 5-NUMBER BET:</b><br>" +
+    neighbors.map(n=>"<span class='hot'>"+n[0]+"</span>").join(", ");
+
+  // ===== PROBABILITIES =====
+  const total = neighbors.reduce((s,n)=>s+n[1],0);
+  document.getElementById("probabilities").innerHTML =
+    "<b>📊 Probabilities:</b><br>" +
+    neighbors.map(n=>{
+      const p = ((n[1]/total)*100).toFixed(1);
+      return n[0]+": "+p+"%";
+    }).join("<br>");
+
+  // ===== CONFIDENCE FILTER =====
+  const strong = neighbors.filter(n=>n[1]>0.4*Math.max(...neighbors.map(x=>x[1])));
+  document.getElementById("confidence").innerHTML =
+    strong.length>=3
+      ? "✅ Strong Confidence – Play"
+      : "⚠️ Weak Confidence – Skip / Reduce Bet";
 }
 
-// --- MAIN LOOP ---
-function loop(){
-  overlay.width = video.videoWidth;
-  overlay.height = video.videoHeight;
-  ctx.drawImage(video,0,0,overlay.width,overlay.height);
-
-  const ball = detectBall(ctx);
-  if(ball) trackBall(ball);
-
-  const physicsPred = predictLandingFromBall(ball);
-  combinePrediction(physicsPred);
-
-  readNumberFromVideo(); // OCR
-  document.getElementById('ballSpeed').innerText = ballSpeed.toFixed(2);
-
-  requestAnimationFrame(loop);
+/* ===== EXPORT / IMPORT ===== */
+function exportHistory(){
+  const blob = new Blob([sessionHistory.join(",")], {type:"text/plain"});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="roulette_history.txt"; a.click();
 }
 
-video.onloadedmetadata = () => loop();
+function importHistory(){
+  document.getElementById("importFile").click();
+}
 
-// --- OPTIONAL: LOAD SCREENSHOT ---
-function loadScreenshot(){
-  const file = document.getElementById('screenshot').files[0];
-  if(!file) return alert("Select a file");
-  const img = new Image();
-  img.onload = ()=>ctx.drawImage(img,0,0,overlay.width,overlay.height);
-  img.src = URL.createObjectURL(file);
+function loadFile(event){
+  const file=event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const text=e.target.result;
+    const nums=text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+    if(nums) sessionHistory=nums.map(Number);
+    alert("History loaded: "+sessionHistory.length+" numbers");
+  }
+  reader.readAsText(file);
 }
 </script>
+
 </body>
 </html>
