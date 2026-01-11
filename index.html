@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF_toggle">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Advanced Roulette Neighbor Analyzer</title>
+<title>Roulette Neighbor Intelligence v2</title>
 
 <style>
 body { background:#000; color:#fff; font-family:Arial; margin:0; text-align:center; }
@@ -11,34 +11,24 @@ header { background:#111; padding:12px; font-size:1.3em; }
 .box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
 textarea { width:95%; height:80px; background:#000; color:#0f0; }
 button { padding:10px; font-size:1em; margin-top:10px; }
-.result { background:#222; padding:8px; margin:6px; border-radius:6px; }
 .good { color:#0f0; }
 .warn { color:#ff0; }
+.bad { color:#f00; }
 </style>
 </head>
 
 <body>
 
-<header>Professional Roulette Neighbor Intelligence</header>
+<header>Advanced Roulette Neighbor Intelligence</header>
 
 <div class="box">
-<b>Last 100 Numbers</b><br>
+<b>Last 100 Numbers (include last 14 here)</b><br>
 <textarea id="history"></textarea>
-</div>
-
-<div class="box">
-<b>Last 14 Numbers (Recent Momentum)</b><br>
-<textarea id="last14"></textarea>
 </div>
 
 <button onclick="analyze()">Analyze Next Spin</button>
 
-<div class="box">
-<div class="result" id="primary"></div>
-<div class="result" id="neighbors"></div>
-<div class="result" id="hot"></div>
-<div class="result" id="risk"></div>
-</div>
+<div class="box" id="out"></div>
 
 <script>
 const wheel = [
@@ -47,67 +37,53 @@ const wheel = [
 22,18,29,7,28,12,35,3,26
 ];
 
-function parseNums(txt){
-  return txt.split(/[\s,]+/).map(n=>parseInt(n)).filter(n=>!isNaN(n)&&n>=0&&n<=36);
+function parse(txt){
+  return txt.split(/[\s,]+/).map(n=>+n).filter(n=>n>=0 && n<=36);
 }
 
 function analyze(){
-  const history = parseNums(document.getElementById("history").value).slice(-100);
-  const recent = parseNums(document.getElementById("last14").value).slice(-14);
-  if(history.length<50 || recent.length<8){
-    alert("Need at least 50 history and 8 recent numbers");
+  const nums = parse(history.value).slice(-100);
+  if(nums.length < 60){
+    out.innerHTML = "<span class='bad'>Need at least 60 numbers</span>";
     return;
   }
 
   const score = Array(37).fill(0);
 
-  // Macro decay-weighted pressure
-  history.forEach((n,i)=>{
-    const w = (i+1)/history.length;
-    const idx = wheel.indexOf(n);
-    for(let d=-3; d<=3; d++){
-      score[(idx+d+37)%37] += 1.5*w;
-    }
-  });
-
-  // Recent acceleration (strong)
-  recent.forEach(n=>{
+  // Main decay-weighted history
+  nums.forEach((n,i)=>{
+    const w = Math.pow((i+1)/nums.length, 1.3);
     const idx = wheel.indexOf(n);
     for(let d=-2; d<=2; d++){
-      score[(idx+d+37)%37] += 3;
+      score[(idx+d+37)%37] += w;
     }
   });
 
-  // Find best target
-  let bestIndex = score.indexOf(Math.max(...score));
-  const primary = wheel[bestIndex];
+  // Anti-repeat penalty (very important)
+  const last = nums[nums.length-1];
+  score[wheel.indexOf(last)] *= 0.25;
 
-  // 12 neighbors (±6)
+  // Find strongest point
+  let best = score.indexOf(Math.max(...score));
+  const target = wheel[best];
+
+  // ±3 neighbors only
   let zone=[];
-  for(let i=-6;i<=6;i++){
-    zone.push(wheel[(bestIndex+i+37)%37]);
+  for(let i=-3;i<=3;i++){
+    zone.push(wheel[(best+i+37)%37]);
   }
 
-  // Hot numbers
-  const hot = [...score]
-    .map((v,i)=>({n:wheel[i],v}))
-    .sort((a,b)=>b.v-a.v)
-    .slice(0,5)
-    .map(o=>o.n);
+  // Confidence calculation
+  const recent = nums.slice(-14);
+  const hits = recent.filter(n=>zone.includes(n)).length;
+  const confidence = hits >= 4 ? "PLAY" : hits >= 2 ? "WAIT" : "SKIP";
 
-  document.getElementById("primary").innerHTML =
-    `<b>Primary Target:</b> <span class="good">${primary}</span>`;
-
-  document.getElementById("neighbors").innerHTML =
-    `<b>Betting Zone (12 neighbors):</b><br>${zone.join(", ")}`;
-
-  document.getElementById("hot").innerHTML =
-    `<b>Top Hot Numbers:</b> ${hot.join(", ")}`;
-
-  const overlap = recent.filter(n=>zone.includes(n)).length;
-  document.getElementById("risk").innerHTML =
-    overlap>=4 ? "✅ Strong alignment – playable"
-               : "⚠️ Weak alignment – wait / reduce";
+  out.innerHTML = `
+    <b>Primary Target:</b> <span class="good">${target}</span><br><br>
+    <b>Bet Zone (±3 neighbors):</b><br>${zone.join(", ")}<br><br>
+    <b>Recent Hits (last 14):</b> ${hits}<br>
+    <b>Signal:</b> <span class="${confidence==='PLAY'?'good':confidence==='WAIT'?'warn':'bad'}">${confidence}</span>
+  `;
 }
 </script>
 
