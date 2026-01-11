@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Roulette Analyzer (Back Camera)</title>
+<title>Mobile Roulette Analyzer - 100 Numbers</title>
 <style>
 body { background:#000; color:#fff; font-family:Arial; text-align:center; margin:0; }
 header { background:#111; padding:12px; font-size:1.2em; }
@@ -17,7 +17,7 @@ video { width:95%; border:2px solid #fff; margin:5px 0; }
 </head>
 <body>
 
-<header>Mobile Roulette Analyzer</header>
+<header>Mobile Roulette Analyzer (Last 100 Numbers)</header>
 
 <video id="rouletteVideo" autoplay muted playsinline></video>
 
@@ -52,7 +52,6 @@ async function startCamera(){
     requestAnimationFrame(analyzeFrame);
   }catch(e){
     alert("Camera access failed: "+e+"\nTrying default camera...");
-    // fallback to default camera
     const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
     const video=document.getElementById("rouletteVideo");
     video.srcObject=stream;
@@ -62,6 +61,7 @@ async function startCamera(){
 }
 
 // Analyze frame for OCR and ball tracking
+let lastOCRTime=0;
 async function analyzeFrame(){
   const video=document.getElementById("rouletteVideo");
   const canvas=document.getElementById("canvas");
@@ -70,16 +70,17 @@ async function analyzeFrame(){
   canvas.height=video.videoHeight;
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  // Detect numbers from top region (adjust if needed)
-  await detectNumbers(ctx);
+  // Run OCR only every 800ms to save performance
+  if(performance.now()-lastOCRTime>800){
+    lastOCRTime=performance.now();
+    await detectNumbers(ctx);
+  }
 
   // Detect ball
   const ball=detectBall(ctx);
   if(ball) trackBallMotion(ball, ctx);
 
-  // Update prediction
   updatePrediction();
-
   requestAnimationFrame(analyzeFrame);
 }
 
@@ -88,7 +89,7 @@ function detectBall(ctx){
   const img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);
   for(let i=0;i<img.data.length;i+=4){
     const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
-    if(r>200 && g>200 && b>200){ 
+    if(r>200 && g>200 && b>200){
       const x=(i/4)%ctx.canvas.width;
       const y=Math.floor(i/4/ctx.canvas.width);
       return {x,y};
@@ -110,17 +111,19 @@ function trackBallMotion(ball, ctx){
   prevTime=now;
 }
 
-// OCR detection
+// OCR detection for last 100 numbers
 async function detectNumbers(ctx){
-  const numRegion={x:ctx.canvas.width*0.4, y:ctx.canvas.height*0.05, w:ctx.canvas.width*0.2, h:ctx.canvas.height*0.08};
+  const numRegion={x:ctx.canvas.width*0.05, y:ctx.canvas.height*0.05, w:ctx.canvas.width*0.9, h:ctx.canvas.height*0.1};
   const imgData=ctx.getImageData(numRegion.x, numRegion.y, numRegion.w, numRegion.h);
-  const result = await Tesseract.recognize(imgData,'eng');
-  const num=parseInt(result.data.text.replace(/\D/g,''));
-  if(!isNaN(num) && num>=0 && num<=36){
-    if(history.length==0 || history[history.length-1]!=num){
-      history.push(num);
-      if(history.length>100) history=history.slice(-100);
+  try{
+    const result = await Tesseract.recognize(imgData,'eng',{logger:m=>{}});
+    let nums=result.data.text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
+    if(nums){
+      nums=nums.map(Number).slice(-100);
+      history=nums;
     }
+  }catch(e){
+    console.log("OCR error",e);
   }
 }
 
@@ -159,8 +162,9 @@ function updatePrediction(){
     strong ? "✅ Strong Confidence – Play" : "⚠️ Weak Confidence – Reduce/Skip";
 }
 
-// Start camera on page load
+// Start camera on load
 startCamera();
 </script>
+
 </body>
 </html>
