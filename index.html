@@ -3,148 +3,158 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Professional Roulette Smart Analyzer</title>
-
+<title>Live Screen Capture Roulette Analyzer</title>
 <style>
-body { background:#000; color:#fff; font-family:Arial, sans-serif; margin:0; text-align:center; }
+body { background:#000; color:#fff; font-family:Arial; text-align:center; margin:0; }
 header { background:#111; padding:12px; font-size:1.2em; }
 #box { background:#1a1a1a; margin:10px; padding:10px; border-radius:6px; }
-textarea { width:95%; height:120px; background:#000; color:#0f0; }
-button { padding:10px 14px; font-size:1em; margin:8px; }
-.result { font-size:1.05em; margin-top:6px; }
+video { width:95%; border:2px solid #fff; margin:5px 0; }
+.result { font-size:1.1em; margin-top:6px; }
 .hot { color:#ff5555; font-weight:bold; }
 .good { color:#ffaa00; }
 .ok { color:#66ccff; }
 </style>
 </head>
-
 <body>
 
-<header>Professional Roulette Smart Analyzer</header>
+<header>Live Screen Capture Roulette Analyzer</header>
 
 <div id="box">
-<b>1️⃣ Paste LAST 100 Numbers (comma or space separated)</b><br>
-<textarea id="numbers"></textarea><br>
-<button onclick="analyze()">ANALYZE</button>
+  <button onclick="startScreenCapture()">Start Screen Capture</button>
+  <video id="rouletteVideo" autoplay muted></video>
 </div>
 
 <div id="box">
-<button onclick="exportHistory()">💾 Export History</button>
-<button onclick="importHistory()">📂 Import History</button>
-<input type="file" id="importFile" style="display:none" onchange="loadFile(event)">
+  <div class="result" id="mainNumber">Main Number: --</div>
+  <div class="result" id="neighbor">Top Neighbor: --</div>
+  <div class="result" id="probabilities">Top Numbers: --</div>
+  <div class="result" id="confidence">Confidence: --</div>
 </div>
 
-<div id="box">
-<div class="result" id="anchors"></div>
-<div class="result" id="neighbors"></div>
-<div class="result" id="probabilities"></div>
-<div class="result" id="confidence"></div>
-</div>
+<canvas id="canvas" style="display:none;"></canvas>
 
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 <script>
 const wheel=[0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,
 30,8,23,10,5,24,16,33,1,20,14,31,9,
 22,18,29,7,28,12,35,3,26];
 
-let sessionHistory = [];
+let history=[];
+let sessionHistory=[];
+let prevAngle=null, prevTime=null, currentSpeed=0;
 
-function analyze(){
-  const input = document.getElementById("numbers").value;
-  let nums = input.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-  if(!nums || nums.length < 30){
-    alert("Paste at least 30 numbers (ideally 100)");
-    return;
+async function startScreenCapture(){
+  try{
+    const stream = await navigator.mediaDevices.getDisplayMedia({video:{cursor:"never"}, audio:false});
+    const video=document.getElementById("rouletteVideo");
+    video.srcObject=stream;
+    await video.play();
+    requestAnimationFrame(analyzeFrame);
+  }catch(e){
+    alert("Screen capture failed: "+e);
   }
-  nums = nums.map(Number).slice(-100);
+}
 
-  // ===== SESSION MEMORY DECAY =====
-  sessionHistory = sessionHistory.concat(nums);
-  if(sessionHistory.length>200) sessionHistory = sessionHistory.slice(-200);
-  const history = sessionHistory.slice(-100);
+// Main analysis frame
+async function analyzeFrame(){
+  const video=document.getElementById("rouletteVideo");
+  const canvas=document.getElementById("canvas");
+  const ctx=canvas.getContext("2d");
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  // ===== HEAT MAP WITH NEIGHBOR INFLUENCE =====
-  let heat = Array(37).fill(0);
+  // OCR: detect numbers
+  await detectNumbers(ctx);
+
+  // Ball detection (simple bright pixel tracking)
+  const ball=detectBall(ctx);
+  if(ball) trackBallMotion(ball);
+
+  // Update predictions
+  updatePrediction();
+
+  requestAnimationFrame(analyzeFrame);
+}
+
+// Simple bright pixel detection for ball
+function detectBall(ctx){
+  const img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);
+  for(let i=0;i<img.data.length;i+=4){
+    const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
+    if(r>200 && g>200 && b>200){ // bright pixel threshold
+      const x=(i/4)%ctx.canvas.width;
+      const y=Math.floor(i/4/ctx.canvas.width);
+      return {x,y};
+    }
+  }
+  return null;
+}
+
+function trackBallMotion(ball){
+  const centerX=ctx.canvas.width/2;
+  const centerY=ctx.canvas.height/2;
+  const now=performance.now();
+  const angle=Math.atan2(ball.y-centerY, ball.x-centerX);
+  if(prevAngle!==null){
+    const dt=(now-prevTime)/1000;
+    currentSpeed=(angle-prevAngle)/dt;
+  }
+  prevAngle=angle;
+  prevTime=now;
+}
+
+// OCR detection of last number
+async function detectNumbers(ctx){
+  const numberRegion={x:ctx.canvas.width*0.4, y:ctx.canvas.height*0.05, w:ctx.canvas.width*0.2, h:ctx.canvas.height*0.08};
+  const imgData=ctx.getImageData(numberRegion.x, numberRegion.y, numberRegion.w, numberRegion.h);
+  const result = await Tesseract.recognize(imgData,'eng');
+  const num=parseInt(result.data.text.replace(/\D/g,''));
+  if(!isNaN(num) && num>=0 && num<=36){
+    if(history.length==0 || history[history.length-1]!=num){
+      history.push(num);
+      if(history.length>100) history=history.slice(-100);
+      sessionHistory=sessionHistory.concat(num);
+      if(sessionHistory.length>200) sessionHistory=sessionHistory.slice(-200);
+    }
+  }
+}
+
+// Prediction Engine
+function updatePrediction(){
+  if(history.length==0) return;
+  const score=Array(37).fill(0);
   history.forEach((n,idx)=>{
-    const idxWheel = wheel.indexOf(n);
-    for(let i=-2;i<=2;i++){
-      const w = Math.abs(i)===0 ? 3 : Math.abs(i)===1 ? 2 : 1;
-      // older spins decay
-      const decay = Math.pow(0.97, history.length-idx);
-      heat[(idxWheel+i+37)%37] += w*decay;
+    const decay=Math.pow(0.95, history.length-idx);
+    score[n]+=3*decay;
+    const idxWheel=wheel.indexOf(n);
+    for(let i=-1;i<=1;i++) if(i!==0){
+      const neighbor=wheel[(idxWheel+i+37)%37];
+      score[neighbor]+=decay;
     }
   });
 
-  // ===== TOP 3 ULTRA-AGGRESSIVE ANCHORS =====
-  let anchors = [...heat]
-    .map((v,i)=>({num:wheel[i],score:v}))
-    .sort((a,b)=>b.score-a.score)
-    .slice(0,3);
+  const sorted=score.map((v,i)=>({num:i,score:v}))
+                    .sort((a,b)=>b.score-a.score);
+  const main=sorted[0];
+  const mainIdx=wheel.indexOf(main.num);
+  const neighbors=[wheel[(mainIdx+1)%37], wheel[(mainIdx-1+37)%37]];
+  const topNeighbor=neighbors.sort((a,b)=>score[b]-score[a])[0];
 
-  document.getElementById("anchors").innerHTML =
-    "<b>🎯 Top 3 Anchor Numbers:</b><br>" +
-    anchors.map(a=>a.num+" ("+a.score.toFixed(1)+")").join(", ");
+  const top5=sorted.slice(0,5);
+  const total=top5.reduce((s,n)=>s+n.score,0);
 
-  // ===== 5-NEIGHBOR SET =====
-  let neighborSet = new Map();
-  anchors.forEach(a=>{
-    const idx = wheel.indexOf(a.num);
-    for(let i=-2;i<=2;i++){
-      const n = wheel[(idx+i+37)%37];
-      const w = Math.abs(i)===0 ? 1.0 : Math.abs(i)===1 ? 0.7 : 0.4;
-      neighborSet.set(n, (neighborSet.get(n)||0) + w*a.score);
-    }
-  });
-
-  let neighbors = [...neighborSet.entries()]
-    .sort((a,b)=>b[1]-a[1])
-    .slice(0,5);
-
-  document.getElementById("neighbors").innerHTML =
-    "<b>🎯 FINAL 5-NUMBER BET:</b><br>" +
-    neighbors.map(n=>"<span class='hot'>"+n[0]+"</span>").join(", ");
-
-  // ===== PROBABILITIES =====
-  const total = neighbors.reduce((s,n)=>s+n[1],0);
-  document.getElementById("probabilities").innerHTML =
-    "<b>📊 Probabilities:</b><br>" +
-    neighbors.map(n=>{
-      const p = ((n[1]/total)*100).toFixed(1);
-      return n[0]+": "+p+"%";
-    }).join("<br>");
-
-  // ===== CONFIDENCE FILTER =====
-  const strong = neighbors.filter(n=>n[1]>0.4*Math.max(...neighbors.map(x=>x[1])));
-  document.getElementById("confidence").innerHTML =
-    strong.length>=3
-      ? "✅ Strong Confidence – Play"
-      : "⚠️ Weak Confidence – Skip / Reduce Bet";
-}
-
-/* ===== EXPORT / IMPORT ===== */
-function exportHistory(){
-  const blob = new Blob([sessionHistory.join(",")], {type:"text/plain"});
-  const url = URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url; a.download="roulette_history.txt"; a.click();
-}
-
-function importHistory(){
-  document.getElementById("importFile").click();
-}
-
-function loadFile(event){
-  const file=event.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = e=>{
-    const text=e.target.result;
-    const nums=text.match(/\b([0-9]|[1-2][0-9]|3[0-6])\b/g);
-    if(nums) sessionHistory=nums.map(Number);
-    alert("History loaded: "+sessionHistory.length+" numbers");
-  }
-  reader.readAsText(file);
+  document.getElementById("mainNumber").innerHTML=
+    "<b>Main Number:</b> <span class='hot'>"+main.num+"</span>";
+  document.getElementById("neighbor").innerHTML=
+    "<b>Top Neighbor:</b> <span class='good'>"+topNeighbor+"</span>";
+  document.getElementById("probabilities").innerHTML=
+    "<b>Top 5 Numbers & Probabilities:</b><br>"+
+    top5.map(n=>n.num+": "+((n.score/total)*100).toFixed(1)+"%").join("<br>");
+  const strong=score[topNeighbor]>0.5*score[main.num];
+  document.getElementById("confidence").innerHTML=
+    strong ? "✅ Strong Confidence – Play" : "⚠️ Weak Confidence – Reduce/Skip";
 }
 </script>
-
 </body>
 </html>
